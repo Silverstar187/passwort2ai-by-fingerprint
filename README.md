@@ -1,7 +1,7 @@
 # Passwort2AI by Fingerprint 🫆
 
 <p align="center">
-  <img src="docs/demo.svg" alt="p2ai demo: AI agent runs aws sts with a Touch-ID-gated AWS key, secret never enters chat" width="720">
+  <img src="docs/demo-v2.svg" alt="p2ai demo: Claude calls gh repo list with Touch-ID-gated GitHub token, secret never enters chat" width="720">
 </p>
 
 <p align="center">
