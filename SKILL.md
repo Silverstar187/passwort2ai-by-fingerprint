@@ -133,6 +133,26 @@ unset TOKEN
 
 If the secret must cross calls (genuinely needed), prefer **clipboard with no auto-clear** for human-driven hand-off and **always re-fetch via `p2ai`** for agent-driven flows. Never assume a shell-var from a previous call still exists.
 
+### Cross-call pattern for any KeePass secret
+
+When the same secret is needed in multiple Bash calls (e.g. multi-step deploy, several curls):
+
+```bash
+# 1. Run `p2ai unlock` ONCE (Touch-ID, master cached in agent RAM 5min idle)
+p2ai unlock
+
+# 2. Subsequent calls re-fetch the secret in each Bash call. Fast (<1s) because
+#    agent serves the master without re-prompting. The actual entry value is
+#    captured into a shell-local variable, used, then unset within the same call.
+PW=$(p2ai fetch 'My Service' --print)
+some-tool --password "$PW"
+unset PW
+```
+
+This avoids the clipboard auto-clear race and the lost-shell-var trap simultaneously. The secret never sits idle in clipboard, and the shell-var is scoped to one Bash() invocation.
+
+For OAuth tokens: `p2ai gtoken` mints a fresh token per call — no clipboard, no cache. Same pattern.
+
 ## DEBUGGING RULE (critical — avoid the leak path)
 
 When `p2ai` fails or returns unexpected data, **DO NOT** debug by running raw `keepassxc-cli show` (or any tool that emits secrets) without redirecting stdout. Anything that lands on stdout in a Bash-tool call enters the conversation transcript.
