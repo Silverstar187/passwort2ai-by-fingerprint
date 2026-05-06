@@ -21,27 +21,28 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 
 | Option | Upside |
 |---|---|
-| 🫆 | Installs with 1 prompt (`brew install`, ~2s) |
-| 🫆 | Secrets in encrypted KeePass DB (your existing one, no vendor lock) |
-| 🫆 | AI must **ask** for every secret. You approve with your fingerprint. |
-| 🫆 | Only you can give permission. Touch-ID gate, every time. |
-| 🫆 | 1 second to use after install |
-| 🫆 | AI never sees the password. It gets a **sealed envelope**: env var into child process, never the parent shell. |
-| 🫆 | **Fast mode**: session unlock = one Touch-ID, then 5 min of instant fetches |
-| 🫆 | **Zero-retention mode**: per-entry, master never cached anywhere |
-| 🫆 | Never leak a token in chat history again |
-| 🫆 | Never grep shell history for "the AWS key from last month" again |
-| 🫆 | All credentials in one place, organized, searchable by you |
-| 🫆 | Manageable by AI: `add`, `edit`, `rm`, `mv`, `list`. Agent maintains its own credential set under your fingerprint. |
-| 🫆 | Bulk-import via script (KeePassXC import formats) |
-| 🫆 | Local-first. Your DB stays on your machine. |
-| 🫆 | Auto-locks on screen lock, screensaver, idle, or hard cap |
-| 🫆 | Clipboard auto-clears after 30s when used for paste |
-| 🫆 | TOTP codes too (`p2ai otp`). Kills authenticator-app tab-switching. |
-| 🫆 | Binary attachments too (service-account JSONs, certs) |
-| 🫆 | Auto-generates 24-char passwords on `add` |
-| 🫆 | Open source, MIT, signed binary, signed releases, 38 security tests |
-| 🫆 | No transcript-leak flags by design (`--print`, `--export`, `-o FILE` absent on purpose) |
+| 🫆 | Installs with 1 Prompt |
+| 🫆 | In encrypted Database |
+| 🫆 | AI must ask to get secrets |
+| 🫆 | only you can give permission |
+| 🫆 | 2 Seconds to install |
+| 🫆 | 1 Second to paste Password |
+| 🫆 | AI can't see the password, just gets a closed letter |
+| 🫆 | fast mode available |
+| 🫆 | zero retention mode available |
+| 🫆 | never leak again |
+| 🫆 | never search again |
+| 🫆 | all in one place, organized |
+| 🫆 | manageable by AI |
+| 🫆 | import by script |
+| 🫆 | local-first, DB stays on your machine |
+| 🫆 | auto-locks on screen lock |
+| 🫆 | clipboard auto-clears after 30s |
+| 🫆 | TOTP codes too |
+| 🫆 | binary attachments too |
+| 🫆 | auto-generates 24-char passwords |
+| 🫆 | open source, MIT, signed releases |
+| 🫆 | no leak flags, ever |
 
 **Main advantage: Speed +++ Security ++**
 
