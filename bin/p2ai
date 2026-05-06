@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+#
+# p2ai — Passwort2AI by Fingerprint.
+# Touch-ID-gated KeePass entry retrieval for terminals + AI agents.
+#
+# Master password lives in macOS Keychain (Touch-ID gated via p2ai-master).
+# Each fetch: Touch-ID prompt → master from keychain → keepassxc-cli pulls entry.
+#
+# Usage:
+#   p2ai setup                              one-time enroll master
+#   p2ai fetch <entry>                      Touch-ID, password to pbcopy + auto-clear 30s
+#   p2ai fetch <entry> --print              print to stdout (no pbcopy)
+#   p2ai fetch <entry> --attr UserName      different attribute (default: Password)
+#   p2ai fetch <entry> --export VAR         emit `export VAR=...` (use with eval $(p2ai fetch …))
+#   p2ai list [query]                       Touch-ID, list entries (filter optional)
+#   p2ai config                             show config + db path
+#   p2ai -h                                 help
+#
+# Config:
+#   $P2AI_DB                                .kdbx path (default ~/Passwörter.kdbx)
+#   $P2AI_KEEPASSXC_CLI                     keepassxc-cli binary (default: auto-detect)
+#   $P2AI_CLEAR_SECONDS                     auto-clear delay (default 30)
+
+set -euo pipefail
+
+P2AI_DB="${P2AI_DB:-$HOME/Passwörter.kdbx}"
+P2AI_CLEAR_SECONDS="${P2AI_CLEAR_SECONDS:-30}"
+P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
+
+die() { printf 'p2ai: %s\n' "$*" >&2; exit 1; }
+
+resolve_kpcli() {
+  if [[ -n "$P2AI_KEEPASSXC_CLI" && -x "$P2AI_KEEPASSXC_CLI" ]]; then
+    printf '%s' "$P2AI_KEEPASSXC_CLI"; return
+  fi
+  for c in "$HOME/bin/keepassxc-cli" "/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli" "/opt/homebrew/bin/keepassxc-cli" "/usr/local/bin/keepassxc-cli"; do
+    [[ -x "$c" ]] && { printf '%s' "$c"; return; }
+  done
+  command -v keepassxc-cli 2>/dev/null && return
+  die "keepassxc-cli not found. Install: brew install --cask keepassxc — or set P2AI_KEEPASSXC_CLI."
+}
+
+require_db() {
+  [[ -r "$P2AI_DB" ]] || die "DB not readable: $P2AI_DB (set P2AI_DB)"
+}
+
+cmd_setup() {
+  exec "$P2AI_MASTER_BIN" setup
+}
+
+cmd_config() {
+  printf 'P2AI_DB:               %s\n' "$P2AI_DB"
+  printf 'P2AI_KEEPASSXC_CLI:    %s\n' "$(resolve_kpcli)"
+  printf 'P2AI_CLEAR_SECONDS:    %s\n' "$P2AI_CLEAR_SECONDS"
+  printf 'master-bin:           %s\n' "$P2AI_MASTER_BIN"
+  printf 'db readable:          %s\n' "$([[ -r "$P2AI_DB" ]] && echo yes || echo NO)"
+}
+
+cmd_list() {
+  require_db
+  local kpcli; kpcli=$(resolve_kpcli)
+  local query="${1:-}"
+  local master; master=$("$P2AI_MASTER_BIN") || die "auth failed"
+  if [[ -n "$query" ]]; then
+    printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null | grep -i -- "$query" || true
+  else
+    printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null
+  fi
+}
+
+cmd_fetch() {
+  local entry="" attr="Password" mode="pbcopy" var=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --print|-p)   mode="print"; shift ;;
+      --attr|-a)    attr="${2:?}"; shift 2 ;;
+      --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
+      --no-clear|-n) mode="${mode}-noclear"; shift ;;
+      -*)           die "unknown flag: $1" ;;
+      *)            [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai fetch <entry> [--attr X] [--print|--export VAR]"
+  require_db
+  local kpcli; kpcli=$(resolve_kpcli)
+  local master; master=$("$P2AI_MASTER_BIN") || die "auth failed"
+
+  local secret
+  secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null | tail -1) || die "entry not found: $entry"
+  master=""
+  [[ -n "$secret" ]] || die "empty value for $entry / $attr"
+
+  case "$mode" in
+    print|print-noclear)
+      printf '%s\n' "$secret"
+      ;;
+    export|export-noclear)
+      # Single-quoted, embedded single-quote escaped via concat trick
+      local esc; esc=$(printf '%s' "$secret" | sed "s/'/'\\\\''/g")
+      printf "export %s='%s'\n" "$var" "$esc"
+      ;;
+    pbcopy)
+      printf '%s' "$secret" | pbcopy
+      printf 'p2ai: %s/%s in clipboard, auto-clear in %ss.\n' "$entry" "$attr" "$P2AI_CLEAR_SECONDS" >&2
+      (
+        sleep "$P2AI_CLEAR_SECONDS"
+        if [[ "$(pbpaste)" == "$secret" ]]; then
+          printf '' | pbcopy
+        fi
+      ) >/dev/null 2>&1 &
+      disown
+      ;;
+    pbcopy-noclear)
+      printf '%s' "$secret" | pbcopy
+      printf 'p2ai: %s/%s in clipboard.\n' "$entry" "$attr" >&2
+      ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-}"; [[ $# -gt 0 ]] && shift || true
+  case "$cmd" in
+    setup)            cmd_setup "$@" ;;
+    fetch|f|get)      cmd_fetch "$@" ;;
+    list|ls)          cmd_list "$@" ;;
+    config|cfg)       cmd_config ;;
+    -h|--help|help|"")
+      sed -n '5,28p' "$0" | sed 's/^# \{0,1\}//'
+      ;;
+    *) die "unknown command: $cmd (try: p2ai -h)" ;;
+  esac
+}
+
+main "$@"

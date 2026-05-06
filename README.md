@@ -4,8 +4,8 @@ Touch-ID-gated KeePass secret retrieval for terminals and AI agents on macOS.
 One fingerprint tap → secret in clipboard or piped to your next command.
 
 ```bash
-p2a fetch "Cloudflare API Token"        # Touch-ID → pbcopy → auto-clear 30s
-eval "$(p2a fetch 'CF Token' --export CF_TOKEN)" && wrangler deploy && unset CF_TOKEN
+p2ai fetch "Cloudflare API Token"        # Touch-ID → pbcopy → auto-clear 30s
+eval "$(p2ai fetch 'CF Token' --export CF_TOKEN)" && wrangler deploy && unset CF_TOKEN
 ```
 
 ## Setup (3 steps)
@@ -16,13 +16,13 @@ git clone https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.pas
 ~/.passwort2ai/install.sh
 
 # 2. Enroll master password (one-time, hidden input)
-p2a setup
+p2ai setup
 
 # 3. Configure your KeePassXC database path (default: ~/Passwörter.kdbx)
-echo 'export P2A_DB="$HOME/your-database.kdbx"' >> ~/.zshrc
+echo 'export P2AI_DB="$HOME/your-database.kdbx"' >> ~/.zshrc
 ```
 
-Done. Now `p2a fetch "<entry>"` taps Touch-ID and copies the password.
+Done. Now `p2ai fetch "<entry>"` taps Touch-ID and copies the password.
 
 ## Requirements
 

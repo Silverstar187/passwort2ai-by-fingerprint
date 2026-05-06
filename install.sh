@@ -6,12 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:-$HOME/.local/bin}"
 
 mkdir -p "$TARGET"
-chmod +x "$SCRIPT_DIR/bin/p2a-master" "$SCRIPT_DIR/bin/p2a"
+chmod +x "$SCRIPT_DIR/bin/p2ai-master" "$SCRIPT_DIR/bin/p2ai"
 
-ln -sf "$SCRIPT_DIR/bin/p2a-master" "$TARGET/p2a-master"
-ln -sf "$SCRIPT_DIR/bin/p2a"        "$TARGET/p2a"
+ln -sf "$SCRIPT_DIR/bin/p2ai-master" "$TARGET/p2ai-master"
+ln -sf "$SCRIPT_DIR/bin/p2ai"        "$TARGET/p2ai"
 
-printf 'Installed:\n  %s/p2a\n  %s/p2a-master\n\n' "$TARGET" "$TARGET"
+printf 'Installed:\n  %s/p2ai\n  %s/p2ai-master\n\n' "$TARGET" "$TARGET"
 
 case ":$PATH:" in
   *":$TARGET:"*) ;;
@@ -41,4 +41,4 @@ if command -v bioutil >/dev/null 2>&1; then
   fi
 fi
 
-printf '\nNext steps:\n  1. p2a setup           # one-time master enrollment\n  2. p2a fetch "<entry>" # Touch-ID → clipboard\n  3. export P2A_DB=...   # if your .kdbx is not at ~/Passwörter.kdbx\n'
+printf '\nNext steps:\n  1. p2ai setup           # one-time master enrollment\n  2. p2ai fetch "<entry>" # Touch-ID → clipboard\n  3. export P2AI_DB=...   # if your .kdbx is not at ~/Passwörter.kdbx\n'

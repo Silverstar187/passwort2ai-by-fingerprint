@@ -1,12 +1,12 @@
 #!/usr/bin/env swift
 //
-// p2a-master — Touch-ID-gated KeePass master password.
+// p2ai-master — Touch-ID-gated KeePass master password.
 // Stores master in macOS Keychain, gates retrieval via LAContext biometrics.
 //
-//   p2a-master setup           Prompt + store master in keychain
-//   p2a-master                 Touch-ID, print master to stdout
-//   p2a-master --pbcopy        Touch-ID, copy master to clipboard
-//   p2a-master remove          Delete keychain item
+//   p2ai-master setup           Prompt + store master in keychain
+//   p2ai-master                 Touch-ID, print master to stdout
+//   p2ai-master --pbcopy        Touch-ID, copy master to clipboard
+//   p2ai-master remove          Delete keychain item
 //
 // Plain keychain item (no biometry-ACL — unsigned CLIs lack entitlements on macOS).
 // Touch-ID gating via LAContext.evaluatePolicy works in unsigned CLIs.
@@ -110,7 +110,7 @@ func fetchMaster(toClipboard: Bool) {
     ]
     var probeRes: AnyObject?
     let probeStatus = SecItemCopyMatching(probe as CFDictionary, &probeRes)
-    if probeStatus == errSecItemNotFound { die("Not stored. Run `p2a-master setup`.") }
+    if probeStatus == errSecItemNotFound { die("Not stored. Run `p2ai-master setup`.") }
 
     requireAuth(reason: "unlock KeePass master")
 
@@ -137,11 +137,11 @@ case "--pbcopy", "-c": fetchMaster(toClipboard: true)
 case nil: fetchMaster(toClipboard: false)
 case "-h", "--help":
     print("""
-    p2a-master — Touch-ID-gated KeePass master password.
-      p2a-master            Touch-ID, master to stdout
-      p2a-master --pbcopy   Touch-ID, master to clipboard
-      p2a-master setup      one-time enrollment
-      p2a-master remove     delete keychain item
+    p2ai-master — Touch-ID-gated KeePass master password.
+      p2ai-master            Touch-ID, master to stdout
+      p2ai-master --pbcopy   Touch-ID, master to clipboard
+      p2ai-master setup      one-time enrollment
+      p2ai-master remove     delete keychain item
     """)
 default:
     die("Unknown arg: \(args.first ?? "") — try -h")
