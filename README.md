@@ -17,7 +17,7 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 | `.env` files | Annoying, scattered, one of them accidentally committed to another repo somewhere. |
 | "It's in your clipboard" | You have to type that prompt every single time. Value lives in clipboard history and Universal Clipboard. |
 
-### ✅ With p2ai
+### ✅ p2ai
 
 | Option | Upside |
 |---|---|
