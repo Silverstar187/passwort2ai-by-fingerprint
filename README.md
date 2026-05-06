@@ -6,21 +6,30 @@
 
 ## All your secrets handed to the LLM, leak-proof, with one fingerprint. 🫆
 
-You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) wants one. Every existing workflow leaks:
+You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) wants one.
 
-- **`.env` files.** Annoying, scattered everywhere, one of them accidentally got committed to another repo and you're not sure which.
-- **Copy-paste into chat.** Exhausting. Plus the value is now in the chat history, prompt logs, vendor servers, possibly training data.
-- **"It's in your clipboard."** Annoying. You have to type that prompt every single time, the AI has to remember to read it, and the value still lives in clipboard history and Universal Clipboard to your iPhone.
-- **Hardcoded "just for testing".** Stays in git blame forever.
+### ❌ Bad options you have (from worst to bad)
 
-> **p2ai removes all four.** One vault (your KeePass `.kdbx`), one finger tap, the value goes straight into the child process's environment. The LLM never sees plaintext. Disk doesn't either.
+| Option | Downside |
+|---|---|
+| Hardcoded "just for testing" | Stays in git blame forever. |
+| Copy-paste into chat | Exhausting. Now in chat history, prompt logs, vendor servers, possibly training data. |
+| `.env` files | Annoying, scattered, one of them accidentally committed to another repo somewhere. |
+| "It's in your clipboard" | You have to type that prompt every single time. Value lives in clipboard history and Universal Clipboard. |
+
+### ✅ With p2ai
+
+| Option | Upside |
+|---|---|
+| `p2ai run -e VAR='entry' -- cmd` | One Touch-ID tap. Value goes only into the child's env. LLM never sees it. |
+| `p2ai fetch 'entry'` | One Touch-ID tap. Clipboard with auto-clear after 30s. |
+
+$\color{green}{\textbf{Main advantage: Speed +++}} \quad \color{orange}{\textbf{Security ++}}$
 
 ```bash
 p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
 # 👆 Touch-ID. Token lives only inside gh's env. No chat leak, no disk leak.
 ```
-
-**One tap instead of two keystrokes. Zero leaks instead of leaks every time.**
 
 |  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
 |---|---|---|---|
