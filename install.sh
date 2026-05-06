@@ -123,17 +123,9 @@ case ":$PATH:" in
 esac
 
 # ── Claude Code skill ─────────────────────────────────────────────────────────
-# Claude Code discovers skills as ~/.claude/skills/<name>/SKILL.md (directory),
-# not flat .md files. Link the SKILL.md inside a dir named after the skill.
 header "Step 3/4: AI Agent Integration"
-CLAUDE_SKILLS="$HOME/.claude/skills"
 if [[ -d "$HOME/.claude" ]]; then
-  # Clean up any prior flat-file install from older installers
-  [[ -L "$CLAUDE_SKILLS/passwort2ai.md" || -f "$CLAUDE_SKILLS/passwort2ai.md" ]] \
-    && rm -f "$CLAUDE_SKILLS/passwort2ai.md"
-  mkdir -p "$CLAUDE_SKILLS/passwort2ai"
-  ln -sf "$SCRIPT_DIR/SKILL.md" "$CLAUDE_SKILLS/passwort2ai/SKILL.md"
-  step "Claude Code skill installed → $CLAUDE_SKILLS/passwort2ai/SKILL.md"
+  P2AI_SKILL_MD="$SCRIPT_DIR/SKILL.md" "$BIN/p2ai" install-skill 2>&1 | sed 's/^p2ai: /  ✓ /'
 else
   step "Claude Code not detected — skipping skill install"
 fi

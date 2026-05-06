@@ -26,6 +26,7 @@
 #   p2ai lock                               kill agent, clear master from RAM
 #   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
+#   p2ai install-skill                      symlink SKILL.md into ~/.claude/skills/passwort2ai/
 #   p2ai -h                                 help
 #
 # IMPORTANT: --print, -o FILE, and --export are removed from fetch/otp/gtoken/
@@ -1096,6 +1097,58 @@ USAGE
   esac
 }
 
+cmd_install_skill() {
+  # Resolve SKILL.md location:
+  #   1. $P2AI_SKILL_MD (env override, set by installer/formula)
+  #   2. resolve self via symlink chain → assume repo layout (bin/p2ai → ../SKILL.md)
+  #   3. brew prefix → share/passwort2ai/SKILL.md
+  local skill_md="${P2AI_SKILL_MD:-}"
+
+  if [[ -z "$skill_md" ]]; then
+    local self="$0"
+    while [[ -L "$self" ]]; do
+      local t; t="$(readlink "$self")"
+      if [[ "$t" = /* ]]; then self="$t"
+      else self="$(cd "$(dirname "$self")" && cd "$(dirname "$t")" && pwd)/$(basename "$t")"
+      fi
+    done
+    local guess="$(cd "$(dirname "$self")/.." 2>/dev/null && pwd)/SKILL.md"
+    [[ -r "$guess" ]] && skill_md="$guess"
+  fi
+
+  if [[ -z "$skill_md" ]] && command -v brew >/dev/null 2>&1; then
+    local prefix; prefix="$(brew --prefix passwort2ai 2>/dev/null || true)"
+    [[ -n "$prefix" && -r "$prefix/share/passwort2ai/SKILL.md" ]] && skill_md="$prefix/share/passwort2ai/SKILL.md"
+  fi
+
+  [[ -n "$skill_md" && -r "$skill_md" ]] || die "could not locate SKILL.md (set P2AI_SKILL_MD=/path/to/SKILL.md)"
+
+  [[ -d "$HOME/.claude" ]] || die "Claude Code not detected (~/.claude missing). Install Claude Code first."
+
+  local skills_root="$HOME/.claude/skills"
+  local dest_dir="$skills_root/passwort2ai"
+  local dest="$dest_dir/SKILL.md"
+
+  # Cleanup any prior flat-file install
+  if [[ -L "$skills_root/passwort2ai.md" || -f "$skills_root/passwort2ai.md" ]]; then
+    rm -f "$skills_root/passwort2ai.md"
+    printf 'p2ai: removed legacy flat skill at %s/passwort2ai.md\n' "$skills_root" >&2
+  fi
+
+  # Resolve both paths to canonical form to detect self-link
+  local src_canon dest_canon
+  src_canon="$(cd "$(dirname "$skill_md")" 2>/dev/null && pwd)/$(basename "$skill_md")"
+  dest_canon="$(cd "$dest_dir" 2>/dev/null && pwd)/SKILL.md"
+  if [[ "$src_canon" == "$dest_canon" ]]; then
+    printf 'p2ai: SKILL.md already at %s (repo lives in skills dir, no symlink needed)\n' "$dest" >&2
+    return 0
+  fi
+
+  mkdir -p "$dest_dir"
+  ln -sf "$skill_md" "$dest"
+  printf 'p2ai: skill installed → %s -> %s\n' "$dest" "$skill_md" >&2
+}
+
 main() {
   local cmd="${1:-}"; [[ $# -gt 0 ]] && shift || true
   case "$cmd" in
@@ -1115,6 +1168,7 @@ main() {
     lock|l)           cmd_lock "$@" ;;
     status|s)         cmd_status "$@" ;;
     config|cfg)       cmd_config ;;
+    install-skill)    cmd_install_skill "$@" ;;
     -h|--help|help|"")
       sed -n '5,32p' "$0" | sed 's/^# \{0,1\}//'
       ;;
