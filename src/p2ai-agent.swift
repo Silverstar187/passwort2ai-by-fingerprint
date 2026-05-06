@@ -33,7 +33,14 @@ import Darwin
 let DEFAULT_TTL: TimeInterval = 300
 let HARD_LIMIT: TimeInterval = 1800
 
-let stateDir = ("\(NSHomeDirectory())/.local/state/p2ai" as NSString).expandingTildeInPath
+// Honor P2AI_STATE_DIR for test isolation + custom XDG layouts.
+// Falls back to ~/.local/state/p2ai if unset.
+let stateDir: String = {
+    if let env = ProcessInfo.processInfo.environment["P2AI_STATE_DIR"], !env.isEmpty {
+        return (env as NSString).expandingTildeInPath
+    }
+    return ("\(NSHomeDirectory())/.local/state/p2ai" as NSString).expandingTildeInPath
+}()
 let sockPath = "\(stateDir)/agent.sock"
 let pidPath  = "\(stateDir)/agent.pid"
 
@@ -52,9 +59,18 @@ func ensureDir() {
         attributes: [.posixPermissions: 0o700])
 }
 
+// Cleanup is ownership-aware: only unlink files this process actually owns.
+// Prevents a race where an outgoing agent (after SIGTERM from successor)
+// deletes the successor's freshly-written socket and pid file.
 func cleanup() {
-    unlink(sockPath)
-    unlink(pidPath)
+    let me = getpid()
+    if let owner = try? String(contentsOfFile: pidPath, encoding: .utf8),
+       let ownerPid = Int32(owner.trimmingCharacters(in: .whitespacesAndNewlines)),
+       ownerPid == me {
+        unlink(pidPath)
+        unlink(sockPath)
+    }
+    // else: pid file points to a different (newer) agent — leave it alone.
 }
 
 // ---- Args ----
@@ -219,12 +235,15 @@ func readLine(_ fd: Int32) -> String? {
     return String(bytes: buf, encoding: .utf8)
 }
 
-// Read remaining bytes until EOF, max 1 MB.
+// Read remaining bytes until EOF, hard-capped at 1 MB.
+// Cap is precise: requests are sized so we never overshoot by a chunk.
 func readToEof(_ fd: Int32) -> Data {
+    let MAX = 1_048_576
     var data = Data()
     var buf = [UInt8](repeating: 0, count: 4096)
-    while data.count < 1_048_576 {
-        let n = read(fd, &buf, buf.count)
+    while data.count < MAX {
+        let want = min(buf.count, MAX - data.count)
+        let n = read(fd, &buf, want)
         if n <= 0 { break }
         data.append(buf, count: n)
     }
