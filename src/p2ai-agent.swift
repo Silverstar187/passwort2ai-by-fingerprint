@@ -19,6 +19,8 @@
 //   PUTENTRY <name>\n<value-bytes...>  → cache entry, replies "OK"
 //                          (length-bytes prefix is implicit via close-on-finish:
 //                           server reads until EOF after PUTENTRY <name>\n)
+//   INVALIDATE <prefix>  → drop all entries with key == prefix or prefix:*
+//                          replies "OK N" (count dropped)
 //   MODE                 → "session" | "per-entry"
 //   STATUS               → "OK ttl_idle=N ttl_abs=N entries=N pid=N mode=X"
 //   EXIT                 → cleanup + die
@@ -108,6 +110,16 @@ func cacheCount() -> Int {
     var n = 0
     cacheQueue.sync { n = entries.count }
     return n
+}
+// Drop all cached entries whose key starts with prefix (entry path).
+// Used when an entry is renamed/edited/deleted so stale values don't linger.
+func cacheInvalidate(_ prefix: String) -> Int {
+    var dropped = 0
+    cacheQueue.sync(flags: .barrier) {
+        let keys = entries.keys.filter { $0 == prefix || $0.hasPrefix(prefix + ":") }
+        for k in keys { entries.removeValue(forKey: k); dropped += 1 }
+    }
+    return dropped
 }
 
 // ---- Single-instance: kill stale agent if any ----
@@ -268,6 +280,10 @@ acceptQueue.async {
             } else {
                 writeAll(client, "ERR empty\n".data(using: .utf8)!)
             }
+
+        case "INVALIDATE":
+            let n = cacheInvalidate(arg)
+            writeAll(client, "OK \(n)\n".data(using: .utf8)!)
 
         case "MODE":
             writeAll(client, "\(mode.rawValue)\n".data(using: .utf8)!)

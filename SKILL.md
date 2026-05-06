@@ -49,6 +49,18 @@ p2ai add "<entry>" -u USER -g 32                  # custom length
 p2ai add "<entry>" -u USER -p                     # user types pw in terminal (not chat)
 p2ai add "<entry>" --url URL --notes TEXT         # URL + notes fields
 
+# Edit / rename / delete / move
+p2ai edit "<entry>" -g                            # rotate password (auto-gen 24c)
+p2ai edit "<entry>" --notes "new text"            # update a single field
+p2ai edit "<entry>" -t "New Title"                # rename entry
+p2ai rm "<entry>"                                 # delete (confirms)
+p2ai rm "<entry>" -f                              # delete without confirm
+p2ai mv "<entry>" "Group/Subgroup"                # move to group
+
+# TOTP / 2FA codes
+p2ai otp "<entry>"                                # → pbcopy + auto-clear
+p2ai otp "<entry>" --print                        # → stdout
+
 # Attachments
 p2ai attachment "<entry>"                          # list attachment names
 p2ai attachment "<entry>" "name.json" -o file.json # export to file
@@ -60,9 +72,11 @@ p2ai gtoken "<sa-entry>" --scope drive --pbcopy    # → clipboard auto-clear
 TOKEN=$(p2ai gtoken "<sa-entry>" -s sheets) && curl -H "Authorization: Bearer $TOKEN" ...; unset TOKEN
 
 # Session caching (sudo-style — Touch-ID once, fetch many)
-p2ai unlock [--ttl 300]    # default 5min idle, 30min hard cap
-p2ai status                # show remaining TTL
-p2ai lock                  # clear master from RAM
+p2ai unlock                          # mode=session: master + entries cached, default 5min idle
+p2ai unlock --mode per-entry         # master never cached, entries cached after first fetch
+p2ai unlock --ttl 600                # custom idle TTL
+p2ai status                          # show mode + remaining TTL + cached entry count
+p2ai lock                            # clear master + entries from RAM
 
 # One-time setup
 p2ai setup                 # master enrollment + .kdbx file picker

@@ -17,8 +17,13 @@
 #   p2ai add <entry> [-u USER] [-g [LEN]]   add new entry; -g auto-generates pw (default 24c)
 #   p2ai add <entry> -p                     add entry with interactive password prompt
 #   p2ai add <entry> --url URL --notes TXT  add with URL + notes fields
+#   p2ai edit <entry> [opts]                update fields (-u/--url/--notes/-t/-g/-p)
+#   p2ai rm <entry> [-f]                    delete entry (confirm unless -f)
+#   p2ai mv <entry> <group>                 move entry to another group
+#   p2ai otp <entry> [--print]              fetch current TOTP code (pbcopy default)
 #   p2ai list [query]                       Touch-ID, list entries (filter optional)
-#   p2ai unlock [--ttl SEC]                 Touch-ID, start agent, master in RAM (default 300s idle)
+#   p2ai unlock [--mode session|per-entry]  Touch-ID, start agent
+#                  [--ttl SEC]                  default mode=session, ttl=300s idle
 #   p2ai lock                               kill agent, clear master from RAM
 #   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
@@ -82,6 +87,18 @@ p2ai_reason() {
     list:de)    printf 'Einträge auflisten' ;;
     list:fr)    printf 'Lister les entrées' ;;
     list:*)     printf 'List entries' ;;
+    rm:de)      printf 'Eintrag "%s" löschen' "$arg" ;;
+    rm:fr)      printf 'Supprimer l\047entrée "%s"' "$arg" ;;
+    rm:*)       printf 'Remove "%s"' "$arg" ;;
+    edit:de)    printf 'Eintrag "%s" bearbeiten' "$arg" ;;
+    edit:fr)    printf 'Modifier l\047entrée "%s"' "$arg" ;;
+    edit:*)     printf 'Edit "%s"' "$arg" ;;
+    mv:de)      printf 'Eintrag "%s" verschieben' "$arg" ;;
+    mv:fr)      printf 'Déplacer l\047entrée "%s"' "$arg" ;;
+    mv:*)       printf 'Move "%s"' "$arg" ;;
+    otp:de)     printf 'TOTP-Code für "%s"' "$arg" ;;
+    otp:fr)     printf 'Code TOTP pour "%s"' "$arg" ;;
+    otp:*)      printf 'TOTP for "%s"' "$arg" ;;
     *)          printf '%s' "$key" ;;
   esac
 }
@@ -504,6 +521,179 @@ USAGE
   fi
 }
 
+cmd_rm() {
+  local entry="" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f|--force) force=1; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai rm <entry> [-f]
+  Remove an entry from the database. Touch-ID required.
+  -f, --force   skip confirmation prompt
+USAGE
+        return 0 ;;
+      -*) die "unknown rm flag: $1" ;;
+      *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai rm <entry> [-f]"
+  require_db
+  [[ -w "$P2AI_DB" ]] || die "DB not writable: $P2AI_DB"
+  local kpcli; kpcli=$(resolve_kpcli)
+
+  if [[ $force -eq 0 ]]; then
+    printf 'Delete entry "%s" from %s? [y/N] ' "$entry" "$P2AI_DB" >&2
+    local ans; read -r ans
+    [[ "$ans" =~ ^[yY]$ ]] || { printf 'p2ai: cancelled.\n' >&2; return 1; }
+  fi
+
+  local master; master=$(fetch_master "$(p2ai_reason rm "$entry")") || die "auth failed"
+  if printf '%s\n' "$master" | "$kpcli" rm "$P2AI_DB" "$entry"; then
+    master=""
+    printf 'p2ai: removed "%s"\n' "$entry" >&2
+    # Best-effort: invalidate any cached entries with this prefix
+    if agent_running; then
+      agent_send "INVALIDATE $entry" >/dev/null 2>&1 || true
+    fi
+  else
+    master=""
+    die "keepassxc-cli rm failed"
+  fi
+}
+
+cmd_edit() {
+  local entry="" user="" url="" notes="" title="" gen_len="" prompt_pw=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -u|--username)  user="${2:?}"; shift 2 ;;
+      --url)          url="${2:?}"; shift 2 ;;
+      --notes|--note) notes="${2:?}"; shift 2 ;;
+      -t|--title)     title="${2:?}"; shift 2 ;;
+      -g|--generate)  gen_len="${2:-24}"
+                      [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
+                      shift 2 ;;
+      -p|--password)  prompt_pw=1; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai edit <entry> [options]
+  -u, --username USER     update username
+  --url URL               update URL
+  --notes TEXT            update notes
+  -t, --title NEW         rename entry (changes title)
+  -g, --generate [LEN]    rotate password (default length 24)
+  -p, --password          prompt interactively for new password
+USAGE
+        return 0 ;;
+      -*) die "unknown edit flag: $1" ;;
+      *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai edit <entry> [-u USER] [--url URL] [--notes TXT] [-t TITLE] [-g [LEN]] [-p]"
+  [[ -n "$user$url$notes$title$gen_len" || $prompt_pw -eq 1 ]] || die "nothing to change — pass at least one option"
+  require_db
+  [[ -w "$P2AI_DB" ]] || die "DB not writable: $P2AI_DB"
+  local kpcli; kpcli=$(resolve_kpcli)
+
+  local args=(edit)
+  [[ -n "$user" ]]   && args+=(-u "$user")
+  [[ -n "$url" ]]    && args+=(--url "$url")
+  [[ -n "$notes" ]]  && args+=(--notes "$notes")
+  [[ -n "$title" ]]  && args+=(-t "$title")
+  if [[ -n "$gen_len" ]]; then
+    args+=(-g -L "$gen_len" -l -U -n -s --exclude-similar)
+  elif [[ $prompt_pw -eq 1 ]]; then
+    args+=(-p)
+  fi
+  args+=("$P2AI_DB" "$entry")
+
+  local master; master=$(fetch_master "$(p2ai_reason edit "$entry")") || die "auth failed"
+  if printf '%s\n' "$master" | "$kpcli" "${args[@]}"; then
+    master=""
+    printf 'p2ai: edited "%s"\n' "$entry" >&2
+    # Invalidate cached values (password may have rotated)
+    if agent_running; then
+      agent_send "INVALIDATE $entry" >/dev/null 2>&1 || true
+    fi
+  else
+    master=""
+    die "keepassxc-cli edit failed"
+  fi
+}
+
+cmd_mv() {
+  local entry="" group=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<USAGE
+p2ai mv <entry> <group>
+  Move an entry to a different group.
+USAGE
+        return 0 ;;
+      -*) die "unknown mv flag: $1" ;;
+      *)  if [[ -z "$entry" ]]; then entry="$1"
+          elif [[ -z "$group" ]]; then group="$1"
+          else die "extra arg: $1"; fi
+          shift ;;
+    esac
+  done
+  [[ -n "$entry" && -n "$group" ]] || die "usage: p2ai mv <entry> <group>"
+  require_db
+  [[ -w "$P2AI_DB" ]] || die "DB not writable: $P2AI_DB"
+  local kpcli; kpcli=$(resolve_kpcli)
+
+  local master; master=$(fetch_master "$(p2ai_reason mv "$entry")") || die "auth failed"
+  if printf '%s\n' "$master" | "$kpcli" mv "$P2AI_DB" "$entry" "$group"; then
+    master=""
+    printf 'p2ai: moved "%s" → %s\n' "$entry" "$group" >&2
+    if agent_running; then
+      agent_send "INVALIDATE $entry" >/dev/null 2>&1 || true
+    fi
+  else
+    master=""
+    die "keepassxc-cli mv failed"
+  fi
+}
+
+cmd_otp() {
+  local entry="" mode="pbcopy"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --print|-p) mode="print"; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai otp <entry> [--print]
+  Fetch current TOTP code for an entry. Default: pbcopy + auto-clear.
+USAGE
+        return 0 ;;
+      -*) die "unknown otp flag: $1" ;;
+      *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai otp <entry> [--print]"
+  require_db
+  local kpcli; kpcli=$(resolve_kpcli)
+
+  local master; master=$(fetch_master "$(p2ai_reason otp "$entry")") || die "auth failed"
+  local code
+  code=$(printf '%s\n' "$master" | "$kpcli" show -s -t "$P2AI_DB" "$entry" 2>/dev/null) || die "no TOTP for entry: $entry"
+  master=""
+  [[ -n "$code" ]] || die "TOTP empty (entry has no OTP configured)"
+  # keepassxc-cli prints TOTP as last line; trim
+  code=$(printf '%s' "$code" | tail -1)
+
+  case "$mode" in
+    print) printf '%s\n' "$code" ;;
+    pbcopy)
+      printf '%s' "$code" | pbcopy
+      printf 'p2ai: TOTP for %s in clipboard, auto-clear in %ss.\n' "$entry" "$P2AI_CLEAR_SECONDS" >&2
+      ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$code" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
+      disown
+      ;;
+  esac
+}
+
 cmd_fetch() {
   local entry="" attr="Password" mode="pbcopy" var=""
   while [[ $# -gt 0 ]]; do
@@ -579,9 +769,13 @@ main() {
     setup)                  cmd_setup "$@" ;;
     fetch|f|get)            cmd_fetch "$@" ;;
     add|new)                cmd_add "$@" ;;
+    rm|remove|del|delete)   cmd_rm "$@" ;;
+    edit|update)            cmd_edit "$@" ;;
+    mv|move|rename)         cmd_mv "$@" ;;
+    otp|totp|2fa)           cmd_otp "$@" ;;
     attachment|attach|att)  cmd_attachment "$@" ;;
     gtoken|gcp-token)       cmd_gtoken "$@" ;;
-    list|ls)                cmd_list "$@" ;;
+    list|ls|search)         cmd_list "$@" ;;
     unlock|u)         cmd_unlock "$@" ;;
     lock|l)           cmd_lock "$@" ;;
     status|s)         cmd_status "$@" ;;
