@@ -1,3 +1,37 @@
+<!-- ============ FONT DEMO (REMOVE BEFORE SHIP) ============ -->
+
+## Font demo — alle LaTeX text variants in `#8B5CF6`
+
+Standard (kein wrap): $\color{#8B5CF6}{Passwort2AI\ by\ Fingerprint}$
+
+`\textsf` (sans-serif): $\color{#8B5CF6}{\textsf{Passwort2AI by Fingerprint}}$
+
+`\textbf` (bold serif): $\color{#8B5CF6}{\textbf{Passwort2AI by Fingerprint}}$
+
+`\mathbf` (bold math serif): $\color{#8B5CF6}{\mathbf{Passwort2AI\ by\ Fingerprint}}$
+
+`\mathsf` (sans math): $\color{#8B5CF6}{\mathsf{Passwort2AI\ by\ Fingerprint}}$
+
+`\mathit` (italic math): $\color{#8B5CF6}{\mathit{Passwort2AI\ by\ Fingerprint}}$
+
+`\mathtt` (monospace): $\color{#8B5CF6}{\mathtt{Passwort2AI\ by\ Fingerprint}}$
+
+`\textit` (italic text): $\color{#8B5CF6}{\textit{Passwort2AI by Fingerprint}}$
+
+`\textrm` (roman text): $\color{#8B5CF6}{\textrm{Passwort2AI by Fingerprint}}$
+
+`\boldsymbol` (bold symbol): $\color{#8B5CF6}{\boldsymbol{Passwort2AI\ by\ Fingerprint}}$
+
+`\mathbf` + `\mathsf` (bold sans): $\color{#8B5CF6}{\mathbf{\mathsf{Passwort2AI\ by\ Fingerprint}}}$
+
+`\textsf` + `\textbf` (bold sans text): $\color{#8B5CF6}{\textsf{\textbf{Passwort2AI by Fingerprint}}}$
+
+`\Large` + `\textsf` + `\textbf`: $\color{#8B5CF6}{\Large\textsf{\textbf{Passwort2AI by Fingerprint}}}$
+
+`\Huge` + `\textsf` + `\textbf`: $\color{#8B5CF6}{\Huge\textsf{\textbf{Passwort2AI by Fingerprint}}}$
+
+<!-- ============ END FONT DEMO ============ -->
+
 # $\color{#8B5CF6}{\textsf{Passwort2AI by Fingerprint}}$ 🫆
 
 <p align="center">
