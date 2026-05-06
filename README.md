@@ -4,48 +4,34 @@
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
 </p>
 
-> **macOS only.** Built on Touch-ID + macOS Keychain + LAContext. Linux/Windows ports would need a different biometric backend (fprintd, Windows Hello) and are out of scope for v0.x.
+## Why
 
-**Touch-ID → KeePass secret → done.** One tap. No paste. No chat-leak.
+AI agents need passwords. Pasting them in chat leaks them everywhere.
+
+> **Agent needs PW → allow by Touch-ID → done.**
+
+No paste. No chat-leak. The secret goes straight to where it's needed.
 
 ```bash
 p2ai fetch "Google Cloud API Token"
-# 👆 Touch-ID prompt → password in clipboard → auto-clears in 30s
+# 👆 Touch-ID → clipboard → auto-clears in 30s
 ```
 
-## Why this exists
+## How
 
-You work with AI agents (Claude Code, Cursor, Copilot). Every time the agent needs a token, you face a bad choice:
+ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master password held only in macOS Keychain (released via `LAContext`). Optional in-RAM agent caches secrets so repeat fetches skip the prompt.
 
-- **Paste it into chat** → leaks into transcripts, prompt logs, GitHub issues, screen-shares.
-- **Stop and look it up in KeePass manually** → 6 clicks, breaks flow, agent waits.
+- **Read:** `fetch`, `list`, `otp`, `attachment`, `gtoken`
+- **Write:** `add`, `edit`, `rm`, `mv`
+- **Session:** `unlock` / `status` / `lock`
 
-Passwort2AI removes both. The agent invokes `p2ai fetch '<entry>'`. You touch the sensor. The secret reaches its destination (clipboard, env-var, pipe) without ever appearing in the conversation.
+## What it isn't
 
-**Net effect:** secrets stay in your KeePass DB. Your AI transcripts stay clean. Your finger is the only thing exposed.
+- Not a replacement for KeePass — your `.kdbx` is still the source of truth
+- Not new crypto — decryption is `keepassxc-cli`
+- Not host hardening — if the machine is compromised, this doesn't save you. See [Caveats](#caveats--what-this-tool-does-not-protect-against)
 
-## What this actually is
-
-**One-sentence pitch:** ssh-agent for KeePass with Touch-ID, so AI agents can fetch secrets without chat-leak.
-
-A Touch-ID-gated wrapper around `keepassxc-cli`. Your master password lives in the macOS Keychain (released only via `LAContext`). An optional short-lived agent caches the master and per-entry values in RAM so repeat fetches skip the Touch-ID prompt — exact same model as `ssh-agent` or `sudo` cache.
-
-**Built for two audiences:**
-
-- **You at the terminal** — `p2ai fetch "AWS Token"` instead of opening the KeePass GUI to copy a value.
-- **AI coding agents** (Claude Code, Cursor, Copilot, etc.) — they call `p2ai fetch '<entry>'` instead of asking you to paste the secret. The token reaches the env-var or pipe it needs without ever crossing the chat transcript.
-
-**Covers the full KeePassXC CLI surface, Touch-ID gated:**
-
-- Read: `fetch`, `list`, `otp` (TOTP), `attachment`, `gtoken` (mints Google OAuth tokens from a SA-JSON stored in entry Notes)
-- Write: `add`, `edit`, `rm`, `mv`
-- Session cache: `unlock` (session or per-entry mode), `status`, `lock`
-
-**What this is NOT:**
-
-- Not a replacement for your KeePass database — the `.kdbx` is still the source of truth.
-- Not a new cryptography stack — all decryption goes through `keepassxc-cli`.
-- Not host hardening — if your machine is compromised, neither the agent's RAM nor the clipboard help. See [Caveats](#caveats--what-this-tool-does-not-protect-against).
+> **macOS only.** Built on Touch-ID + Keychain + LAContext. Linux/Windows would need a different biometric backend.
 
 ## Setup (3 steps)
 
