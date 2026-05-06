@@ -1,4 +1,6 @@
-# $\color{#8B5CF6}{\textsf{Passwort2AI by Fingerprint}}$ 🫆
+<p align="center">
+  <img src="docs/hero.svg" alt="Passwort2AI by Fingerprint" width="720">
+</p>
 
 <p align="center">
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
