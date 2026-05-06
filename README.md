@@ -4,6 +4,8 @@
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
 </p>
 
+> **macOS only.** Built on Touch-ID + macOS Keychain + LAContext. Linux/Windows ports would need a different biometric backend (fprintd, Windows Hello) and are out of scope for v0.x.
+
 **Touch-ID → KeePass secret → done.** One tap. No paste. No chat-leak.
 
 ```bash
