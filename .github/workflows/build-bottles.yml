@@ -40,8 +40,6 @@ jobs:
             bottle_tag: arm64_sequoia
           - os: macos-14
             bottle_tag: arm64_sonoma
-          - os: macos-13
-            bottle_tag: ventura
     runs-on: ${{ matrix.os }}
     steps:
       - name: Resolve tag
@@ -133,7 +131,6 @@ jobs:
           SHA_TAHOE=$(cat        /tmp/bottle-sha/tahoe.sha256         2>/dev/null || echo "")
           SHA_SEQUOIA=$(cat      /tmp/bottle-sha/arm64_sequoia.sha256 2>/dev/null || echo "")
           SHA_SONOMA=$(cat       /tmp/bottle-sha/arm64_sonoma.sha256  2>/dev/null || echo "")
-          SHA_VENTURA=$(cat      /tmp/bottle-sha/ventura.sha256       2>/dev/null || echo "")
 
           # Build bottle block (only include lines where SHA is present)
           BOTTLE_BLOCK="  bottle do\n    root_url \"${ROOT_URL}\""
@@ -141,7 +138,6 @@ jobs:
           [[ -n "$SHA_TAHOE"     ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, tahoe:         \"${SHA_TAHOE}\""
           [[ -n "$SHA_SEQUOIA"   ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sequoia: \"${SHA_SEQUOIA}\""
           [[ -n "$SHA_SONOMA"    ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sonoma:  \"${SHA_SONOMA}\""
-          [[ -n "$SHA_VENTURA" ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, ventura:       \"${SHA_VENTURA}\""
           BOTTLE_BLOCK+="\n  end"
 
           # Remove old bottle block if present, then insert after license line
