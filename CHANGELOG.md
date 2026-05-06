@@ -4,6 +4,68 @@ All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/), major bumps on breaking CLI changes.
 
+## [0.6.0] - 2026-05-07
+
+### Added
+
+- **`p2ai system-prompt [--target generic|claude|cursor|aider|cline]`** —
+  emits AI-agent rules markdown to pipe into `.cursorrules`, `CLAUDE.md`,
+  `.aider.conf.yml`, etc.
+- **`p2ai install-skill`** — symlinks `SKILL.md` into
+  `~/.claude/skills/passwort2ai/SKILL.md` (the directory layout Claude Code
+  discovers). Auto-resolves source via `$P2AI_SKILL_MD`, self-symlink
+  detection, or brew prefix.
+- **`p2ai list --json`** — structured output for programmatic consumption.
+- **`p2ai run --env-file FILE`** — load entry mappings from a dotenv-style
+  file (`VAR=entry::Attr`).
+- **`$P2AI_AUTH_TIMEOUT`** (default 30s) bounds the Touch-ID prompt so a
+  forgotten dialog cannot hang indefinitely.
+- **Exit-code contract** documented in `bin/p2ai` header
+  (0/1/2/3/130 with stable semantics).
+- **Guided install** (`install.sh`) — auto-installs `keepassxc-cli` via
+  Homebrew when missing, checks Touch-ID enrollment, appends PATH to shell
+  rc idempotently, links the Claude Code skill, prints per-project
+  one-liners for Cursor/Cline/Aider, and offers to run `p2ai setup`.
+- **Guided setup** (`p2ai setup`) — banner explains each step, banner-style
+  Swift prompts during master enrollment, auto-creates the KeePass DB at
+  `~/passwords.kdbx` when none exists (no file dialog), then runs PATH and
+  Claude Code skill checks with `[Y/n]` prompts so setup is self-sufficient
+  regardless of install path.
+
+### Changed
+
+- **Default DB path** is now `~/passwords.kdbx` (was `~/Passwörter.kdbx`).
+  Existing installs keep their saved path in `~/.local/share/p2ai/db.path`.
+
+### Fixed
+
+- `cmd_setup` smoke-test ran on the original default path instead of the
+  user's chosen DB after the file picker. Smoke-test now verifies the
+  database that was actually selected/created.
+- Installer no longer skips the shell-rc PATH update when `$TARGET` happens
+  to be on `$PATH` transiently (which broke new terminals).
+- Installer creates the Claude Code skill as a directory link
+  (`~/.claude/skills/passwort2ai/SKILL.md`) instead of a flat
+  `passwort2ai.md`, which Claude Code does not discover. Migrates legacy
+  flat-file installs.
+- `cmd_setup` now captures `keepassxc-cli db-create` stderr to a temp file
+  and replays it on failure, plus verifies the resulting `.kdbx` is
+  non-empty before saving the path.
+
+### Notes
+
+- macOS-only. Built on Touch-ID, Keychain, and `LAContext`.
+- Homebrew formula auto-links the Claude Code skill via `post_install`
+  when `~/.claude/` exists.
+
+## [0.5.1] - 2026-05-06
+
+### Fixed
+
+- `p2ai run` now uses one-shot env injection plus same-PID `exec`, so
+  signals (`SIGINT`, `SIGTERM`) reach the target command directly. Prior
+  release wrapped the child in a parent shell that intercepted signals.
+
 ## [0.5.0] - 2026-05-06
 
 ### BREAKING
