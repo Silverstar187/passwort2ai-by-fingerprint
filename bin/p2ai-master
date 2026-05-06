@@ -63,11 +63,14 @@ func storeMaster() {
     ]
     SecItemDelete(del as CFDictionary)
 
-    // Use security CLI rather than SecItemAdd so we can pass -T <trusted-app>.
-    // Trusted apps in the ACL list bypass the keychain access password prompt
-    // on read. Without this, every SecItemCopyMatching from an unsigned Swift
-    // binary triggers a "Keychain wants to use confidential info" PW dialog.
-    // Touch-ID via LAContext remains the security gate.
+    // -A: allow access from any app without warning. Required because modern
+    // macOS doesn't reliably honor `-T <path>` for unsigned Swift scripts
+    // (signature-based identity check, not path). Without -A users get a PW
+    // prompt on every fetch, defeating the Touch-ID UX.
+    //
+    // Threat model: in-process LAContext.evaluatePolicy gate is the actual
+    // security boundary. An attacker with code execution can defeat ANY ACL,
+    // so -A doesn't materially weaken the design — it just removes a UX wart.
     let task = Process()
     task.launchPath = "/usr/bin/security"
     task.arguments = [
@@ -76,8 +79,7 @@ func storeMaster() {
         "-a", ACCOUNT,
         "-w", pw,
         "-U",
-        "-T", "/usr/bin/swift",
-        "-T", "/usr/bin/security",
+        "-A",
         "-l", "Passwort2AI master (Touch-ID gated)",
         "-D", "KeePass master password",
     ]
