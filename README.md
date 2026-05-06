@@ -29,7 +29,7 @@ ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master password
 
 - Not a replacement for KeePass — your `.kdbx` is the source of truth.
 - Not new crypto — decryption is `keepassxc-cli`.
-- Not host hardening — if the machine is compromised, this doesn't save you. See [Caveats](#caveats).
+- Not host hardening — same trust model as `ssh-agent`. See [Scope](#scope).
 
 > **macOS only.** Built on Touch-ID + Keychain + `LAContext`.
 
@@ -97,25 +97,11 @@ Two modes:
 - `session` (default) — master + per-entry values cached. One Touch-ID at unlock; every subsequent fetch is instant. Threat model = `ssh-agent` / `sudo` cache.
 - `per-entry` — master is never cached. New entries need a fresh Touch-ID; fetched entries are cached until idle expiry.
 
-## Caveats
+## Scope
 
-Passwort2AI is a **UX layer for LLM-driven workflows**. It removes the "paste your token in chat" anti-pattern. It does **not** harden your machine or your secret store.
+p2ai sits **between your KeePass DB and the AI tools you use day-to-day**. It eliminates one specific anti-pattern: pasting secrets in chat. It does not replace KeePass, FDE, or your hardware token — those layers still apply if you need them.
 
-<details>
-<summary>What it does <strong>not</strong> protect against</summary>
-
-It only helps when:
-
-1. **The LLM agent respects the skill rules** — fetches via `p2ai`, never echoes values back, uses `--export` + `eval` for env-vars. A jailbroken agent can still leak.
-2. **Your host is not compromised** — RAM-scraping malware, rogue browser extensions, or `pbpaste` from another process all bypass this layer.
-3. **The user follows the flow** — `p2ai unlock` on public WiFi without `p2ai lock` afterwards leaves a RAM window.
-
-**Out of scope:** compromised laptop, unattended unlocked screen, malicious browser extensions, memory-scraping malware, physical attacks, phishing pages, unencrypted `.kdbx` backups in iCloud, a coerced or buggy LLM that pastes the secret anyway.
-
-**In scope:** "Claude needs the Cloudflare token" → fetched silently, lands in env, never crosses chat. Pasting tokens into Slack / GitHub issues / screen-shares → friction makes you not do it. Convenience-driven shortcuts that historically led to credentials in `~/.zsh_history`.
-
-For threats #2 / #3 you need a hardware token (YubiKey + KeePassXC Yubikey challenge-response), full-disk encryption with a separate key, and host protection. Passwort2AI is orthogonal — it's the layer between your KeePass DB and the AI tools you actually use day-to-day.
-</details>
+Trust model: same as `ssh-agent` / `sudo` cache. The agent holds secrets in process RAM with idle TTL, hard cap, and auto-lock on screen-lock. A compromised host can read agent RAM. For tighter isolation use `--mode per-entry` (master is never cached) or `p2ai lock` after each session.
 
 ## License
 
