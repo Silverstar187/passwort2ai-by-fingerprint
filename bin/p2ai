@@ -10,17 +10,16 @@
 #
 # Usage:
 #   p2ai setup                              one-time enroll master
-#   p2ai fetch <entry>                      Touch-ID, password to pbcopy + auto-clear 30s
-#   p2ai fetch <entry> --print              print to stdout (no pbcopy)
+#   p2ai fetch <entry>                      Touch-ID, password → pbcopy + auto-clear 30s
 #   p2ai fetch <entry> --attr UserName      different attribute (default: Password)
-#   p2ai fetch <entry> --export VAR         emit `export VAR=...` (use with eval $(p2ai fetch …))
+#   p2ai fetch <entry> --export VAR         → 'export VAR=...' for use with eval
 #   p2ai add <entry> [-u USER] [-g [LEN]]   add new entry; -g auto-generates pw (default 24c)
 #   p2ai add <entry> -p                     add entry with interactive password prompt
 #   p2ai add <entry> --url URL --notes TXT  add with URL + notes fields
 #   p2ai edit <entry> [opts]                update fields (-u/--url/--notes/-t/-g/-p)
 #   p2ai rm <entry> [-f]                    delete entry (confirm unless -f)
 #   p2ai mv <entry> <group>                 move entry to another group
-#   p2ai otp <entry> [--print]              fetch current TOTP code (pbcopy default)
+#   p2ai otp <entry>                        TOTP → pbcopy + auto-clear (or --export VAR)
 #   p2ai list [query]                       Touch-ID, list entries (filter optional)
 #   p2ai unlock [--mode session|per-entry]  Touch-ID, start agent
 #                  [--ttl SEC]                  default mode=session, ttl=300s idle
@@ -28,6 +27,9 @@
 #   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
 #   p2ai -h                                 help
+#
+# IMPORTANT: --print is removed from fetch/otp/gtoken/attachment to prevent
+# transcript leaks in AI-agent shells. Use pbcopy (default) or --export VAR.
 #
 # Config:
 #   $P2AI_DB                                .kdbx path (default ~/Passwörter.kdbx)
@@ -301,11 +303,11 @@ cmd_list() {
 }
 
 cmd_gtoken() {
-  local entry="" scope="https://www.googleapis.com/auth/cloud-platform" mode="print" var=""
+  local entry="" scope="https://www.googleapis.com/auth/cloud-platform" mode="pbcopy" var=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scope|-s)   scope="$2"; shift 2 ;;
-      --print|-p)   mode="print"; shift ;;
+      --print|-p)   die "--print removed (transcript-leak risk). Use --export VAR + eval, or --pbcopy (default)." ;;
       --pbcopy|-c)  mode="pbcopy"; shift ;;
       --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
       -h|--help)
@@ -315,8 +317,7 @@ p2ai gtoken <sa-entry> [options]
   SA JSON must be in the entry's Notes field (a {...} block).
   --scope, -s SCOPE   default: cloud-platform. Aliases: drive, drive.readonly,
                       gmail, sheets, calendar, etc. Full URL also accepted.
-  --print, -p         token to stdout (default)
-  --pbcopy, -c        token to clipboard, auto-clear after \$P2AI_CLEAR_SECONDS
+  --pbcopy, -c        token to clipboard, auto-clear after \$P2AI_CLEAR_SECONDS (default)
   --export, -e VAR    emit 'export VAR=...' for use with eval
 USAGE
         return 0 ;;
@@ -324,7 +325,7 @@ USAGE
       *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai gtoken <sa-entry> [--scope X] [--print|--pbcopy|--export VAR]"
+  [[ -n "$entry" ]] || die "usage: p2ai gtoken <sa-entry> [--scope X] [--pbcopy | --export VAR]"
 
   # Resolve scope shortcuts to full URL
   case "$scope" in
@@ -340,46 +341,54 @@ USAGE
 
   command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not found (https://cloud.google.com/sdk/docs/install)"
 
+  require_db
+  local kpcli; kpcli=$(resolve_kpcli)
+
+  # 1. Fetch SA Notes inline — value stays in this shell's RAM, never stdout
+  local master; master=$(fetch_master "$(p2ai_reason fetch "$entry")") || die "auth failed"
+  local notes
+  notes=$(printf '%s' "$master" | "$kpcli" show -s -a Notes "$P2AI_DB" "$entry" 2>/dev/null) || die "could not fetch '$entry' Notes attr"
+  master=""
+  [[ -n "$notes" ]] || die "Notes empty for entry '$entry'"
+
+  # 2. Extract first {...} JSON block, validate, send to gcloud via tmpfile.
+  #    gcloud requires a key-file path — we minimise exposure: mode 600, in
+  #    a private tmpdir, shredded on EXIT.
   local tmpdir; tmpdir=$(mktemp -d -t p2ai-gtoken)
+  chmod 700 "$tmpdir"
   trap "rm -rf -P '$tmpdir' 2>/dev/null" EXIT
+  local json="$tmpdir/sa.json"
 
-  # 1. Fetch SA Notes → file (no chat-leak via stdout-redirect)
-  local raw="$tmpdir/raw" json="$tmpdir/sa.json" tok="$tmpdir/tok"
-  if ! "$0" fetch "$entry" --attr Notes --print > "$raw" 2>/dev/null; then
-    die "could not fetch '$entry' Notes attr"
-  fi
-
-  # 2. Extract first {...} JSON block
-  python3 - <<PY > "$json" 2>/dev/null
-import re, json, sys
-raw=open("$raw").read()
-m=re.search(r'\{[\s\S]*\}', raw)
+  # Pipe Notes via stdin so the SA-JSON never lands in argv (visible in `ps`)
+  P2AI_NOTES="$notes" python3 - <<'PY' > "$json" 2>/dev/null
+import os, re, json, sys
+raw = os.environ.get("P2AI_NOTES", "")
+m = re.search(r'\{[\s\S]*\}', raw)
 if not m: sys.exit(1)
 try:
-    obj=json.loads(m.group(0))
+    obj = json.loads(m.group(0))
     if 'private_key' not in obj or 'client_email' not in obj: sys.exit(2)
     json.dump(obj, sys.stdout)
 except Exception:
     sys.exit(3)
 PY
+  notes=""
   [[ -s "$json" ]] || die "could not extract SA JSON from '$entry' Notes (need {...} with private_key + client_email)"
   chmod 600 "$json"
 
-  # 3. Activate SA + print access token
+  # 3. Activate SA + mint access token. gcloud writes the token to stdout of
+  #    its own subprocess — we capture it into a local var so it never reaches
+  #    our caller's stdout.
   CLOUDSDK_PYTHON_SUPPRESS_WARNINGS=1 gcloud auth activate-service-account --key-file="$json" --quiet >/dev/null 2>&1 \
     || die "gcloud auth activate-service-account failed"
-  CLOUDSDK_PYTHON_SUPPRESS_WARNINGS=1 gcloud auth print-access-token --scopes="$scope" > "$tok" 2>/dev/null \
+  local token
+  token=$(CLOUDSDK_PYTHON_SUPPRESS_WARNINGS=1 gcloud auth print-access-token --scopes="$scope" 2>/dev/null) \
     || die "gcloud print-access-token failed (scope: $scope)"
-  [[ -s "$tok" ]] || die "empty token returned"
-
-  local token; token=$(<"$tok")
   token="${token//$'\n'/}"
+  [[ -n "$token" ]] || die "empty token returned"
 
-  # 4. Output
+  # 4. Output: pbcopy or export — never stdout-print
   case "$mode" in
-    print)
-      printf '%s\n' "$token"
-      ;;
     pbcopy)
       printf '%s' "$token" | pbcopy
       printf 'p2ai: gtoken (%s) in clipboard, auto-clear in %ss.\n' "$scope" "$P2AI_CLEAR_SECONDS" >&2
@@ -394,20 +403,20 @@ PY
 }
 
 cmd_attachment() {
-  local entry="" name="" outfile="" mode="auto"
+  local entry="" name="" outfile="" mode="" var=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -o|--output)  outfile="${2:?}"; mode="file"; shift 2 ;;
-      --print|-p)   mode="print"; shift ;;
+      --print|-p)   die "--print removed (transcript-leak risk). Use --export VAR for text, or -o FILE for binary blobs." ;;
+      --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
       --pbcopy|-c)  mode="pbcopy"; shift ;;
       -h|--help)
         cat <<USAGE
 p2ai attachment <entry> [<attachment-name>] [options]
-  no name              → list attachment names of entry
-  <name>               → export to stdout (default if attachment is text)
-  <name> -o FILE       → export to file
-  <name> --pbcopy      → copy to clipboard (auto-clear)
-  <name> --print       → force stdout even if binary
+  no name              → list attachment names (metadata only, safe to print)
+  <name> -o FILE       → export to file (only legit path for binary blobs)
+  <name> --pbcopy      → copy text content to clipboard (default, text only, auto-clear)
+  <name> --export VAR  → emit 'export VAR=...' for use with eval
 USAGE
         return 0 ;;
       -*) die "unknown attachment flag: $1" ;;
@@ -417,7 +426,7 @@ USAGE
           shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai attachment <entry> [<name>] [-o FILE | --print | --pbcopy]"
+  [[ -n "$entry" ]] || die "usage: p2ai attachment <entry> [<name>] [-o FILE | --export VAR | --pbcopy]"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
   local master; master=$(fetch_master "$(p2ai_reason attachment "$entry")") || die "auth failed"
@@ -430,6 +439,9 @@ USAGE
     return 0
   fi
 
+  # Default for named attachment fetch: pbcopy (text only, never blind stdout)
+  [[ -z "$mode" ]] && mode="pbcopy"
+
   if [[ "$mode" == "file" ]]; then
     printf '%s\n' "$master" | "$kpcli" attachment-export "$P2AI_DB" "$entry" "$name" "$outfile" 2>&1 | tail -1
     master=""
@@ -437,26 +449,27 @@ USAGE
     return 0
   fi
 
-  # Default mode: depends on size + content type. Fetch to memory.
+  # In-memory fetch (text path)
   local content
   content=$(printf '%s\n' "$master" | "$kpcli" attachment-export --stdout "$P2AI_DB" "$entry" "$name" 2>/dev/null) || die "attachment '$name' not found in '$entry'"
   master=""
   [[ -n "$content" ]] || die "attachment '$name' empty"
 
+  # Refuse binary content for non-file modes
+  if printf '%s' "${content:0:8192}" | LC_ALL=C grep -q $'\0'; then
+    die "attachment '$name' is binary — use -o FILE to save (clipboard/env-var modes are text-only)"
+  fi
+
   case "$mode" in
-    print)   printf '%s\n' "$content" ;;
     pbcopy)
       printf '%s' "$content" | pbcopy
       printf 'p2ai: attachment %s/%s in clipboard, auto-clear in %ss.\n' "$entry" "$name" "$P2AI_CLEAR_SECONDS" >&2
       ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$content" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
       disown
       ;;
-    auto)
-      # Heuristic: if content looks text (no NULs in first 8KB), print; else require explicit mode
-      if printf '%s' "${content:0:8192}" | LC_ALL=C grep -q $'\0'; then
-        die "attachment '$name' is binary — use -o FILE to save"
-      fi
-      printf '%s\n' "$content"
+    export)
+      local esc; esc=$(printf '%s' "$content" | sed "s/'/'\\\\''/g")
+      printf "export %s='%s'\n" "$var" "$esc"
       ;;
   esac
 }
@@ -657,21 +670,24 @@ USAGE
 }
 
 cmd_otp() {
-  local entry="" mode="pbcopy"
+  local entry="" mode="pbcopy" var=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --print|-p) mode="print"; shift ;;
+      --print|-p)  die "--print is removed (would leak into AI transcripts). Use --export VAR + eval." ;;
+      --export|-e) mode="export"; var="${2:?}"; shift 2 ;;
       -h|--help)
         cat <<USAGE
-p2ai otp <entry> [--print]
-  Fetch current TOTP code for an entry. Default: pbcopy + auto-clear.
+p2ai otp <entry> [--export VAR]
+  Fetch current TOTP code for an entry.
+  Default: pbcopy + auto-clear after \$P2AI_CLEAR_SECONDS.
+  --export, -e VAR    emit 'export VAR=...' for use with eval
 USAGE
         return 0 ;;
       -*) die "unknown otp flag: $1" ;;
       *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai otp <entry> [--print]"
+  [[ -n "$entry" ]] || die "usage: p2ai otp <entry> [--export VAR]"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
 
@@ -698,7 +714,12 @@ cmd_fetch() {
   local entry="" attr="Password" mode="pbcopy" var=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --print|-p)   mode="print"; shift ;;
+      --print|-p)
+        die "--print removed (transcript-leak risk). Use --export VAR + eval — value stays in subprocess RAM, never on disk, never in stdout."
+        ;;
+      --out|-o)
+        die "-o FILE removed for fetch (no-disk policy). Use --export VAR; if a tool needs a file path, write the var to a tmpfile yourself in the same shell line."
+        ;;
       --attr|-a)    attr="${2:?}"; shift 2 ;;
       --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
       --no-clear|-n) mode="${mode}-noclear"; shift ;;
@@ -706,7 +727,7 @@ cmd_fetch() {
       *)            [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai fetch <entry> [--attr X] [--print|--export VAR]"
+  [[ -n "$entry" ]] || die "usage: p2ai fetch <entry> [--attr X] [--export VAR]"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
 
@@ -738,9 +759,6 @@ cmd_fetch() {
   fi
 
   case "$mode" in
-    print|print-noclear)
-      printf '%s\n' "$secret"
-      ;;
     export|export-noclear)
       local esc; esc=$(printf '%s' "$secret" | sed "s/'/'\\\\''/g")
       printf "export %s='%s'\n" "$var" "$esc"

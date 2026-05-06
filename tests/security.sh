@@ -120,7 +120,7 @@ section "6. Cache invalidation on mutation"
 
 start_agent session
 "$P2AI" add "InvTest" -u alice >/dev/null 2>&1
-"$P2AI" fetch "InvTest" --attr UserName --print >/dev/null 2>&1
+"$P2AI" fetch "InvTest" --attr UserName --export _DUMMY >/dev/null 2>&1
 status_before=$(ag "STATUS" | grep -oE 'entries=[0-9]+')
 
 "$P2AI" rm "InvTest" -f >/dev/null 2>&1
@@ -209,6 +209,33 @@ resp=$(ag "PWNED")
 resp=$(ag "")
 [[ -n "$resp" ]] && pass "empty command handled (got: $resp)" || pass "empty command silently ignored"
 
+section "13b. --print and disk-output refused (transcript-leak prevention)"
+
+# fetch --print → die
+"$P2AI" add "PrintGuard" -u who -g 16 >/dev/null 2>&1
+out=$("$P2AI" fetch "PrintGuard" --print 2>&1)
+echo "$out" | grep -q "removed" && pass "fetch --print refused" || fail "fetch --print not blocked: $out"
+
+out=$("$P2AI" otp "PrintGuard" --print 2>&1)
+echo "$out" | grep -q "removed" && pass "otp --print refused" || fail "otp --print not blocked"
+
+out=$("$P2AI" gtoken "PrintGuard" --print 2>&1)
+echo "$out" | grep -q "removed" && pass "gtoken --print refused" || fail "gtoken --print not blocked"
+
+out=$("$P2AI" attachment "PrintGuard" "f" --print 2>&1)
+echo "$out" | grep -q "removed" && pass "attachment --print refused" || fail "attachment --print not blocked"
+
+out=$("$P2AI" fetch "PrintGuard" -o /tmp/p2ai-leak-test 2>&1)
+echo "$out" | grep -q "removed" && pass "fetch -o FILE refused (no-disk policy)" || fail "fetch -o FILE not blocked"
+rm -f /tmp/p2ai-leak-test  # safety: should not exist anyway
+
+# --export should still work
+eval "$("$P2AI" fetch "PrintGuard" --attr UserName --export _U 2>/dev/null)"
+[[ "$_U" == "who" ]] && pass "--export VAR still works" || fail "--export broken"
+unset _U
+
+"$P2AI" rm "PrintGuard" -f >/dev/null 2>&1
+
 section "14. Socket peer-UID check (code review)"
 
 # Can't easily test cross-UID in single-user CI, but verify the syscall is in the binary
@@ -222,7 +249,7 @@ section "15. Lock clears all cached secrets"
 
 start_agent session
 "$P2AI" add "ClearTest" -u alice >/dev/null 2>&1
-"$P2AI" fetch "ClearTest" --attr UserName --print >/dev/null 2>&1
+"$P2AI" fetch "ClearTest" --attr UserName --export _DUMMY >/dev/null 2>&1
 sleep 0.2
 status=$(ag "STATUS" | grep -oE 'entries=[0-9]+')
 [[ "$status" == "entries=1" ]] || fail "setup failed: $status"

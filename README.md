@@ -58,16 +58,23 @@ p2ai unlock
 
 ### Read secrets
 
+Two egress paths only — both ephemeral, neither hits stdout or disk:
+**`pbcopy` (default)** for human-driven paste, **`--export VAR` + `eval`** for tools that read from env.
+
 ```bash
 p2ai fetch "<entry>"                              # Touch-ID → clipboard → auto-clear 30s
-p2ai fetch "<entry>" --print                      # → stdout (for piping)
 p2ai fetch "<entry>" --attr UserName              # any attribute (default: Password)
-eval "$(p2ai fetch '<entry>' --export TOKEN)"     # → $TOKEN env-var, no disk-touch
-p2ai list [query]                                 # search entries (Touch-ID gated)
+eval "$(p2ai fetch '<entry>' --export TOKEN)"     # → $TOKEN env-var
+tool-that-reads-env-var
+unset TOKEN
+
+p2ai list [query]                                 # metadata-only search (no values exposed)
 p2ai otp "<entry>"                                # current TOTP code → clipboard
-p2ai attachment "<entry>" file.json -o out.json   # export file attachment
-p2ai gtoken "<sa-entry>" --scope drive.readonly   # mint Google OAuth token from SA-JSON
+p2ai attachment "<entry>" file.json -o out.json   # binary attachments → file (mode 600)
+eval "$(p2ai gtoken '<sa-entry>' -s drive --export TOK)"  # Google OAuth → env-var
 ```
+
+> `--print` (stdout dump) and `-o FILE` for `fetch` are intentionally absent. Stdout dumps land in AI-agent transcripts; disk writes leave artefacts. The wrapper refuses both.
 
 ### Write secrets
 
