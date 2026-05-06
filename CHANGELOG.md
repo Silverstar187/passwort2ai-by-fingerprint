@@ -103,3 +103,4 @@ p2ai attachment 'X' 'cred.json' -o ./cred.json
 
 - First release. Bash wrapper around `keepassxc-cli` with Touch-ID gate via
   macOS Keychain + `LAContext`.
+
