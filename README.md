@@ -36,8 +36,13 @@ ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master password
 ## Setup (3 steps)
 
 ```bash
-# 1. Install (clones, compiles native binaries, symlinks to ~/.local/bin)
-git clone https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
+# 1. Install — pin to a tagged release, don't follow main blindly.
+#    install.sh compiles the Swift binaries locally and symlinks to ~/.local/bin.
+#    Read it before running. The whole repo is small enough to audit.
+git clone --branch v0.3.0 --depth 1 \
+  https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
+( cd ~/.passwort2ai && git verify-tag v0.3.0 2>/dev/null \
+    || echo "(unsigned tag — verify via GitHub web UI: commit SHA pinned by tag)" )
 ~/.passwort2ai/install.sh
 
 # 2. Enroll master password + pick your .kdbx via native file dialog
@@ -46,6 +51,8 @@ p2ai setup
 # 3. (optional) Cache master in agent for 5min idle to skip Touch-ID per fetch
 p2ai unlock
 ```
+
+> **Why the pin matters.** This tool runs as your user, holds your master password in RAM, and decrypts your KeePass DB. Cloning `main` would trust whatever was pushed last; pinning to `v0.3.0` ties you to a specific commit SHA you can review. Tags are not signed yet (no GPG key) — verify by reading the source before installing.
 
 ## Daily use
 
