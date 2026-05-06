@@ -24,8 +24,8 @@ p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
 
 |  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
 |---|---|---|---|
-| **Keystrokes** | `Cmd+Tab`, click value, `Cmd+C`, `Cmd+Tab`, click chat input, `Cmd+V` (4 keys + 2 clicks) | `Cmd+C` plus typing "use the token in my clipboard for X" (~50) | **1 Touch-ID tap** |
-| **Leak vectors** | transcript, server logs, training data | clipboard history, Universal Clipboard | **0** |
+| ⌨️ **Keystrokes** | `Cmd+Tab`, click value, `Cmd+C`, `Cmd+Tab`, click chat input, `Cmd+V` (4 keys + 2 clicks) | `Cmd+C` plus typing "use the token in my clipboard for X" (~50) | **1 Touch-ID tap** |
+| 👀 **Who sees it** | you, the LLM, vendor servers, log pipelines, possibly training data | you, the LLM, your clipboard history, every device on your iCloud account | **only the target tool** |
 
 ## Install
 
