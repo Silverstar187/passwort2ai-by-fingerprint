@@ -21,7 +21,27 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 
 | Option | Upside |
 |---|---|
-| 🫆 | <ul><li>Installs with 1 prompt (`brew install`, ~2s)</li><li>Secrets in encrypted KeePass DB (your existing one — no vendor lock)</li><li>AI must **ask** for every secret. You approve with your fingerprint.</li><li>Only you can give permission. Touch-ID gate, every time.</li><li>1 second to use after install</li><li>AI never sees the password — it gets a **sealed envelope** (env var into child process, never the parent shell)</li><li>**Fast mode**: session unlock = one Touch-ID, then 5 min of instant fetches</li><li>**Zero-retention mode**: per-entry, master never cached anywhere</li><li>Never leak a token in chat history again</li><li>Never grep shell history for "the AWS key from last month" again</li><li>All credentials in one place, organized, searchable by you</li><li>Manageable by AI: `add`, `edit`, `rm`, `mv`, `list` — agent maintains its own credential set under your fingerprint</li><li>Bulk-import via script (KeePassXC import formats)</li><li>Local-first — your DB stays on your machine</li><li>Auto-locks on screen lock, screensaver, idle, or hard cap</li><li>Clipboard auto-clears after 30s when used for paste</li><li>TOTP codes too (`p2ai otp`) — kill your authenticator-app tab-switching</li><li>Binary attachments too (service-account JSONs, certs)</li><li>Auto-generates 24-char passwords on `add`</li><li>Open source, MIT, signed binary, signed releases, 38 security tests</li><li>No transcript-leak flags by design (`--print`, `--export`, `-o FILE` absent on purpose)</li></ul> |
+| 🫆 | Installs with 1 prompt (`brew install`, ~2s) |
+| 🫆 | Secrets in encrypted KeePass DB (your existing one, no vendor lock) |
+| 🫆 | AI must **ask** for every secret. You approve with your fingerprint. |
+| 🫆 | Only you can give permission. Touch-ID gate, every time. |
+| 🫆 | 1 second to use after install |
+| 🫆 | AI never sees the password. It gets a **sealed envelope**: env var into child process, never the parent shell. |
+| 🫆 | **Fast mode**: session unlock = one Touch-ID, then 5 min of instant fetches |
+| 🫆 | **Zero-retention mode**: per-entry, master never cached anywhere |
+| 🫆 | Never leak a token in chat history again |
+| 🫆 | Never grep shell history for "the AWS key from last month" again |
+| 🫆 | All credentials in one place, organized, searchable by you |
+| 🫆 | Manageable by AI: `add`, `edit`, `rm`, `mv`, `list`. Agent maintains its own credential set under your fingerprint. |
+| 🫆 | Bulk-import via script (KeePassXC import formats) |
+| 🫆 | Local-first. Your DB stays on your machine. |
+| 🫆 | Auto-locks on screen lock, screensaver, idle, or hard cap |
+| 🫆 | Clipboard auto-clears after 30s when used for paste |
+| 🫆 | TOTP codes too (`p2ai otp`). Kills authenticator-app tab-switching. |
+| 🫆 | Binary attachments too (service-account JSONs, certs) |
+| 🫆 | Auto-generates 24-char passwords on `add` |
+| 🫆 | Open source, MIT, signed binary, signed releases, 38 security tests |
+| 🫆 | No transcript-leak flags by design (`--print`, `--export`, `-o FILE` absent on purpose) |
 
 **Main advantage: Speed +++ Security ++**
 
