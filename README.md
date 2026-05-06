@@ -39,9 +39,9 @@ ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master password
 # 1. Install — pin to a tagged release, don't follow main blindly.
 #    install.sh compiles the Swift binaries locally and symlinks to ~/.local/bin.
 #    Read it before running. The whole repo is small enough to audit.
-git clone --branch v0.3.0 --depth 1 \
+git clone --branch v0.4.0 --depth 1 \
   https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
-( cd ~/.passwort2ai && git verify-tag v0.3.0 2>/dev/null \
+( cd ~/.passwort2ai && git verify-tag v0.4.0 2>/dev/null \
     || echo "(unsigned tag — verify via GitHub web UI: commit SHA pinned by tag)" )
 ~/.passwort2ai/install.sh
 
@@ -52,7 +52,7 @@ p2ai setup
 p2ai unlock
 ```
 
-> **Why the pin matters.** This tool runs as your user, holds your master password in RAM, and decrypts your KeePass DB. Cloning `main` would trust whatever was pushed last; pinning to `v0.3.0` ties you to a specific commit SHA you can review. Tags are not signed yet (no GPG key) — verify by reading the source before installing.
+> **Why the pin matters.** This tool runs as your user, holds your master password in RAM, and decrypts your KeePass DB. Cloning `main` would trust whatever was pushed last; pinning to `v0.4.0` ties you to a specific commit SHA you can review. Tags are not signed yet (no GPG key) — verify by reading the source before installing.
 
 ## Daily use
 
@@ -75,6 +75,8 @@ eval "$(p2ai gtoken '<sa-entry>' -s drive --export TOK)"  # Google OAuth → env
 ```
 
 > `--print` (stdout dump) and `-o FILE` for `fetch` are intentionally absent. Stdout dumps land in AI-agent transcripts; disk writes leave artefacts. The wrapper refuses both.
+>
+> **Upgrading from 0.3.x?** See [CHANGELOG.md](CHANGELOG.md#040--2026-05-06) for the migration recipe — replace every `--print` with `eval "$(p2ai fetch 'X' --export VAR)"`.
 
 ### Write secrets
 
