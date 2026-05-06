@@ -4,58 +4,58 @@
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
 </p>
 
-## Alle deine Secrets — leak-sicher per Fingerabdruck dem LLM übergeben.
+## All your secrets handed to the LLM, leak-proof, with one fingerprint.
 
-Du bist Dev. Du hast 30+ Tokens, API-Keys, DB-Passwörter. Jeder Coding-Agent (Claude Code, Cursor, Aider, Cline, Copilot) will mindestens einen davon. Bisher sind alle Wege scheiße:
+You're a dev. You have 30+ tokens, API keys, DB passwords. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) needs at least one of them. Every existing workflow leaks:
 
-- **`.env`-Files überall** — verstreut auf 20 Repos, manche im Git-Index gelandet, secret-rotation = händische Suche
-- **Passwort-Manager → Chat-Paste** — LLM sieht Klartext, landet im Transcript, in Prompt-Logs, in Anthropic/OpenAI Servern, im Browser-Cache, möglicherweise im LLM-Training-Set
-- **Copy + "es ist in clipboard"** — AI muss `pbpaste` aufrufen, manuelle Schritte, Wert lebt in Clipboard-Historie + Universal Clipboard zu deinem iPhone, two-key-combo `Cmd+C → Cmd+V` reicht für Daumen-Fehler in falsches Fenster
-- **Hardcoded für "kurz testen"** — kommt nie raus, in Git Blame foreverr
+- **`.env` files everywhere.** Scattered across 20 repos. Some accidentally committed to git. Secret rotation means a manual hunt.
+- **Password manager, then paste in chat.** The LLM sees the plaintext. It lands in the transcript, in prompt logs, on Anthropic or OpenAI or Cursor servers, in your browser cache, possibly in future training sets.
+- **Copy and tell the AI "it's in your clipboard".** You hit `Cmd+C` then `Cmd+V` somewhere. The value lives in your clipboard history and (if enabled) on every device via Universal Clipboard.
+- **Hardcoded "just for a quick test".** Never gets removed. Lives in git blame forever.
 
-> **p2ai löst alle vier:** ein Vault (dein KeePass `.kdbx`), ein Finger-Tap, Wert geht direkt in die Tool-Env des Child-Prozesses. LLM sieht den Klartext nie. Disk sieht ihn nie. Clipboard wird (default) nicht mal benutzt.
+> **p2ai removes all four.** One vault (your KeePass `.kdbx`), one finger tap, the value goes straight into the child process's environment. The LLM never sees the plaintext. Disk never sees it. The clipboard (by default) isn't even involved.
 
 ```bash
 p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
-# 👆 Touch-ID → token nur in gh's env → kein Chat-Leak, kein Disk-Leak
+# Touch-ID prompts. Token lives only inside gh's env. No chat leak, no disk leak.
 ```
 
-**Eine Taste statt zwei. Kein Leak statt jedes Mal Leak.**
+**One tap instead of two keystrokes. Zero leaks instead of leaks every time.**
 
 ## Why this exists
 
-AI coding agents brauchen Tokens. Standard-Workflow heute = User pastet ihn in Chat. Damit ist der Token:
-- im Conversation-Transcript (Anthropic / OpenAI / Cursor server)
-- in lokalen Prompt-Logs
-- in Screen-Recordings, Pair-Programming-Sessions, Demo-Streams
-- möglicherweise in Trainings-Daten zukünftiger Modelle
+AI coding agents need tokens. The default workflow today is "user pastes it into chat". From that moment the token is:
+- in the conversation transcript (Anthropic, OpenAI, Cursor servers)
+- in local prompt logs
+- in screen recordings, pair-programming sessions, demo streams
+- possibly in the training data for future models
 
-p2ai entfernt diesen einen Anti-Pattern und ersetzt ihn durch Touch-ID-gated env-injection: der Agent ruft `p2ai run -e ...` auf, du tappst den Sensor, das Tool sieht den Wert in seiner Environment, niemand sonst.
+p2ai removes that one anti-pattern and replaces it with Touch-ID-gated env-injection. The agent calls `p2ai run -e ...`, you tap the sensor, the target tool sees the value in its environment, nothing else does.
 
 ## How
 
-ssh-agent-Modell für KeePass, gegated durch Touch-ID. Wraps `keepassxc-cli`. Master-Passwort lebt nur in der macOS Keychain (release via `LAContext`). Optional in-RAM-Agent cached Secrets damit wiederholte Aufrufe den Prompt skippen.
+ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master password lives only in the macOS Keychain (released via `LAContext`). An optional in-RAM agent caches secrets so repeat fetches skip the prompt.
 
-- **Read** — `fetch`, `list`, `otp`, `attachment`, `gtoken`
-- **Run** — `run` (env-injection in child only)
-- **Write** — `add`, `edit`, `rm`, `mv`
-- **Session** — `unlock` / `status` / `lock`
+- **Read.** `fetch`, `list`, `otp`, `attachment`, `gtoken`
+- **Run.** `run` (env-injection into the child only)
+- **Write.** `add`, `edit`, `rm`, `mv`
+- **Session.** `unlock`, `status`, `lock`
 
-**Tastenanzahl im Vergleich:**
+**Keystrokes vs. leaks:**
 
-| Workflow | Tasten | Leak-Vektoren |
+| Workflow | Keystrokes | Leak vectors |
 |---|---|---|
-| Copy-paste in Chat | `Cmd+Tab` → `Cmd+C` → `Cmd+Tab` → `Cmd+V` (4) | Chat-Transcript, server-side logs, training data |
-| `pbpaste` + AI-prompt | manuell `Cmd+C` (1) + AI-Prompt schreiben (n) | Clipboard-history, Universal Clipboard zu iPhone |
-| **`p2ai run`** | **1 Touch-ID-Tap** | **0** — Wert geht direkt in Child-Env |
+| Copy-paste into chat | `Cmd+Tab`, `Cmd+C`, `Cmd+Tab`, `Cmd+V` (4) | chat transcript, server-side logs, training data |
+| `pbpaste` plus AI prompt | one `Cmd+C` plus writing the prompt | clipboard history, Universal Clipboard to your iPhone |
+| **`p2ai run`** | **1 Touch-ID tap** | **0.** Value goes straight into the child's env. |
 
 ## What it isn't
 
-- Not a replacement for KeePass — dein `.kdbx` bleibt die Source of Truth.
-- Not new crypto — Decryption ist `keepassxc-cli`.
-- Not host hardening — selber Trust-Model wie `ssh-agent`. Siehe [Scope](#scope).
+- Not a replacement for KeePass. Your `.kdbx` stays the source of truth.
+- Not new crypto. Decryption is `keepassxc-cli`.
+- Not host hardening. Same trust model as `ssh-agent`. See [Scope](#scope).
 
-> **macOS only.** Gebaut auf Touch-ID + Keychain + `LAContext`.
+> **macOS only.** Built on Touch-ID, Keychain, and `LAContext`.
 
 ## Install
 
@@ -86,7 +86,7 @@ p2ai setup
 
 ## Daily use
 
-Two egress paths only — neither lets the secret reach the parent shell or disk:
+Two egress paths only. Neither lets the secret reach the parent shell or disk.
 **`p2ai run`** for tool invocations (env-injection only into the child), **`p2ai fetch`** for clipboard hand-off (default pbcopy + auto-clear).
 
 ```bash
@@ -129,15 +129,15 @@ Master password lives in macOS Keychain. Every `fetch` triggers `LAContext.evalu
 `p2ai unlock` spawns a short-lived agent (`p2ai-agent`) that caches secrets in process RAM with idle TTL + 30-min hard cap. The agent listens on a Unix socket (mode 600 in a mode-700 dir) and verifies peer UID via `getpeereid()`. Auto-locks on `com.apple.screenIsLocked`, `com.apple.screensaver.didstart`, idle expiry, hard cap, or `p2ai lock`. `rm` / `edit` / `mv` invalidate cached entries so rotations don't linger.
 
 Two modes:
-- `session` (default) — master + per-entry values cached. One Touch-ID at unlock; every subsequent fetch is instant. Threat model = `ssh-agent` / `sudo` cache.
-- `per-entry` — master is never cached. New entries need a fresh Touch-ID; fetched entries are cached until idle expiry.
+- `session` (default). Master plus per-entry values cached. One Touch-ID at unlock, every subsequent fetch is instant. Threat model matches `ssh-agent` / `sudo` cache.
+- `per-entry`. Master is never cached. New entries need a fresh Touch-ID. Fetched entries are cached until idle expiry.
 
 ## Scope
 
-p2ai sits **between your KeePass DB and the AI tools you use day-to-day**. It eliminates one specific anti-pattern: pasting secrets in chat. It does not replace KeePass, FDE, or your hardware token — those layers still apply if you need them.
+p2ai sits **between your KeePass DB and the AI tools you use day-to-day**. It eliminates one specific anti-pattern: pasting secrets in chat. It does not replace KeePass, FDE, or your hardware token. Those layers still apply if you need them.
 
-Trust model: same as `ssh-agent` / `sudo` cache. The agent holds secrets in process RAM with idle TTL, hard cap, and auto-lock on screen-lock. A compromised host or another same-user process can read agent RAM, the clipboard, or env-vars (via `ps e` / memory dump) — same constraint as every credential helper. For tighter isolation use `--mode per-entry` (master is never cached) or `p2ai lock` after each session.
+Trust model: same as `ssh-agent` / `sudo` cache. The agent holds secrets in process RAM with idle TTL, hard cap, and auto-lock on screen-lock. A compromised host or another same-user process can read agent RAM, the clipboard, or env-vars (via `ps e` or memory dump). That's the same constraint as every credential helper. For tighter isolation use `--mode per-entry` (master is never cached) or `p2ai lock` after each session.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

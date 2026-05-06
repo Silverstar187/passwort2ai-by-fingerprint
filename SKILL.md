@@ -1,6 +1,6 @@
 ---
 name: passwort2ai
-description: Touch-ID-gated KeePass secret retrieval and storage for AI agents and humans. Use whenever you (Claude or any agent) need an API key, database password, OAuth token, SSH passphrase, or any other credential — fetch via `p2ai fetch "<entry>"` or `p2ai run -e VAR='entry' -- <cmd>`, NEVER ask the user to paste secrets in chat. Also use to STORE new secrets via `p2ai add "<entry>"` instead of having the user type passwords into chat. When the user provides a secret via clipboard (e.g. "I copied the token, use it"), read clipboard via `pbpaste`, never echo the value back into the conversation. Triggers macOS Touch-ID; secret reaches clipboard or the target command's environment without ever appearing in transcript. Triggers: "I need the X token", "store this in KeePass", "save the credential", "fetch the API key", "wrangler/supabase/lemlist credentials needed".
+description: Touch-ID-gated KeePass secret retrieval and storage for AI agents and humans. Use whenever you (Claude or any agent) need an API key, database password, OAuth token, SSH passphrase, or any other credential, fetch via `p2ai fetch "<entry>"` or `p2ai run -e VAR='entry' -- <cmd>`, NEVER ask the user to paste secrets in chat. Also use to STORE new secrets via `p2ai add "<entry>"` instead of having the user type passwords into chat. When the user provides a secret via clipboard (e.g. "I copied the token, use it"), read clipboard via `pbpaste`, never echo the value back into the conversation. Triggers macOS Touch-ID; secret reaches clipboard or the target command's environment without ever appearing in transcript. Triggers: "I need the X token", "store this in KeePass", "save the credential", "fetch the API key", "wrangler/supabase/lemlist credentials needed".
 ---
 
 # Passwort2AI by Fingerprint
@@ -11,12 +11,12 @@ Touch-ID-gated KeePass-CLI wrapper. Replaces every "paste your token in chat" wi
 
 1. **Never ask the user to paste a secret in chat.**
 2. **Never echo or quote a secret value back into the conversation.** Not in code blocks, not in error messages, not in summaries. Even truncated/masked values can leak.
-3. **Two egress paths only — both ephemeral, neither hits stdout or disk:**
-   - **`p2ai run -e VAR='entry' -- <cmd>`** — secret enters only the target command's environment. The parent shell never holds it. **Use this for every tool invocation that needs a secret in env.**
-   - **`p2ai fetch '<entry>'`** — pbcopy with auto-clear after 30s. Use this for human-driven paste flows.
+3. **Two egress paths only, both ephemeral, neither hits stdout or disk:**
+   - **`p2ai run -e VAR='entry' -- <cmd>`**, secret enters only the target command's environment. The parent shell never holds it. **Use this for every tool invocation that needs a secret in env.**
+   - **`p2ai fetch '<entry>'`**, pbcopy with auto-clear after 30s. Use this for human-driven paste flows.
 4. **`--print`, `-o FILE` for fetch, and `--export VAR` are all REMOVED.** Each was a transcript-leak path. The wrapper refuses them with a pointer to `p2ai run`.
 5. **When the user shares a secret via clipboard** ("I copied it"), read with `pbpaste` and pipe directly to the consumer (`pbpaste | tool` etc.). Never echo it back.
-6. **For storing new secrets**: `p2ai add "<entry>"` with `-g` (auto-generate) or `-p` (interactive prompt — user types in their terminal, not in chat).
+6. **For storing new secrets**: `p2ai add "<entry>"` with `-g` (auto-generate) or `-p` (interactive prompt, user types in their terminal, not in chat).
 
 ## When to use this skill
 
@@ -84,28 +84,28 @@ p2ai setup                 # master enrollment + .kdbx file picker
 | User asks "copy token to clipboard" | `p2ai fetch 'X'` (pbcopy + auto-clear) |
 | Don't know exact entry name | `p2ai list <fuzzy>` first |
 | User hands you a fresh secret to save | `p2ai add 'Service Name' -u user -p` |
-| User pasted secret to clipboard already | `pbpaste \| tool` — never echo to chat |
+| User pasted secret to clipboard already | `pbpaste \| tool`, never echo to chat |
 | Need many fetches in succession | `p2ai unlock` once, then proceed |
-| Tool wants secret as CLI arg (`--password=X`) | **Avoid** — argv visible via `ps`. Prefer `p2ai run` + env, or `--password-stdin` if available |
-| Inspecting a secret's structure | `p2ai run -e V='X'::Notes -- bash -c 'grep -q "marker" <<<"$V"; echo $?'` — only the boolean reaches transcript |
+| Tool wants secret as CLI arg (`--password=X`) | **Avoid**, argv visible via `ps`. Prefer `p2ai run` + env, or `--password-stdin` if available |
+| Inspecting a secret's structure | `p2ai run -e V='X'::Notes -- bash -c 'grep -q "marker" <<<"$V"; echo $?'`, only the boolean reaches transcript |
 
 ## Configuration
 
-- `$P2AI_DB` — KeePass `.kdbx` path (default `~/Passwörter.kdbx`, override via state file from `p2ai setup`)
-- `$P2AI_KEEPASSXC_CLI` — override binary path (auto-detects `~/bin`, Homebrew, `/Applications/KeePassXC.app/Contents/MacOS/`)
-- `$P2AI_CLEAR_SECONDS` — clipboard auto-clear delay (default 30)
-- `$P2AI_AGENT_TTL` — agent idle TTL seconds (default 300)
-- `$P2AI_STATE_DIR` — agent socket + pid location (default `~/.local/state/p2ai`)
-- `$P2AI_LANG` — Touch-ID dialog reason language override (default: macOS AppleLocale)
+- `$P2AI_DB`: KeePass `.kdbx` path (default `~/Passwörter.kdbx`, override via state file from `p2ai setup`)
+- `$P2AI_KEEPASSXC_CLI`: override binary path (auto-detects `~/bin`, Homebrew, `/Applications/KeePassXC.app/Contents/MacOS/`)
+- `$P2AI_CLEAR_SECONDS`: clipboard auto-clear delay (default 30)
+- `$P2AI_AGENT_TTL`: agent idle TTL seconds (default 300)
+- `$P2AI_STATE_DIR`: agent socket + pid location (default `~/.local/state/p2ai`)
+- `$P2AI_LANG`: Touch-ID dialog reason language override (default: macOS AppleLocale)
 
 ## Security model
 
-- Master password lives in macOS Keychain (`p2ai-master`). Every retrieval is gated by `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` — Touch-ID is the only auth gate.
+- Master password lives in macOS Keychain (`p2ai-master`). Every retrieval is gated by `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`, Touch-ID is the only auth gate.
 - Master is held in shell-variable scope for one `keepassxc-cli` call, then cleared. With `p2ai unlock`, master moves into the agent process's RAM with idle TTL + auto-lock on screen-lock / screensaver Distributed Notifications.
 - **Storage:** KeePass `.kdbx` (encrypted, persistent). The DB is the single source of truth.
 - **Runtime cache:** `p2ai-agent` process RAM only. Ephemeral, dies on lock / screen-lock / idle / hard-cap.
 - **Egress (legit):** clipboard (auto-clear 30s) and `p2ai run` (subshell-fork, env in child only). Never disk, never stdout, never the parent shell's env.
-- `rm`, `edit`, `mv` invalidate cached entries automatically — rotated passwords don't linger.
+- `rm`, `edit`, `mv` invalidate cached entries automatically, rotated passwords don't linger.
 
 ## Skill invocation rule (for Claude / agents)
 
@@ -119,10 +119,10 @@ p2ai setup                 # master enrollment + .kdbx file picker
 
 In the Claude-Code Bash tool (and most AI agent shells), **each `Bash(...)` invocation is a fresh shell**. Shell variables, `cd`, `export`, and the working directory do NOT persist across calls.
 
-Therefore: **`p2ai run` is always the right tool for AI agents** — it scopes the secret to one command's lifetime, never relies on shell state surviving across calls.
+Therefore: **`p2ai run` is always the right tool for AI agents**, it scopes the secret to one command's lifetime, never relies on shell state surviving across calls.
 
 ```bash
-# Each Bash call is independent — agent re-fetches per call
+# Each Bash call is independent, agent re-fetches per call
 p2ai run -e PW='My Service' -- some-tool --password-stdin <<<"$PW"
 # Or:
 p2ai run -e API='Stripe' -- node scripts/import.js
@@ -140,7 +140,7 @@ keepassxc-cli show -a Notes db.kdbx "Entry"          # secret → stdout → cha
 keepassxc-cli show --show-attachments db "Entry"     # ALL fields → chat
 ```
 
-**Right — wrap in `p2ai run`, only output a boolean / metric:**
+**Right, wrap in `p2ai run`, only output a boolean / metric:**
 ```bash
 p2ai run -e N='Entry'::Notes -- bash -c 'grep -q "expected-marker" <<<"$N" && echo found || echo missing'
 p2ai run -e V='Entry' -- bash -c 'printf "len=%d sha=%s\n" "${#V}" "$(printf %s "$V" | shasum -a 256 | cut -c1-12)"'

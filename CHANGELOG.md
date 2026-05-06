@@ -2,14 +2,14 @@
 
 All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning is [SemVer](https://semver.org/) — major bumps on breaking CLI changes.
+Versioning is [SemVer](https://semver.org/), major bumps on breaking CLI changes.
 
-## [0.5.0] — 2026-05-06
+## [0.5.0] - 2026-05-06
 
 ### BREAKING
 
 - **`--export VAR` removed** from `fetch`, `otp`, `gtoken`, `attachment`. The
-  flag printed `export VAR='value'` to stdout — when the caller's stdout was
+  flag printed `export VAR='value'` to stdout, when the caller's stdout was
   captured by an AI-agent's Bash tool (Claude Code, Cursor, etc.), the secret
   string entered the conversation transcript. Even with `eval` consumption,
   any accidental pipe (`| head`, `2>&1 | tee`, command substitution misuse)
@@ -42,7 +42,7 @@ or write a small shell script and run it via `p2ai run -- bash script.sh`.
 
 ### Added
 
-- **`p2ai run [-e VAR='entry'[::attr]] [...] -- <command>`** — primary egress
+- **`p2ai run [-e VAR='entry'[::attr]] [...] -- <command>`**, primary egress
   for tool invocations. Forks a subshell, exports requested secrets there
   only, `exec`s the command. The parent shell's environment never holds the
   values, eliminating the env-leak window between `eval` and `unset` (which
@@ -57,10 +57,10 @@ or write a small shell script and run it via `p2ai run -- bash script.sh`.
 - `fetch` no longer accepts `--export`, `--print`, or `-o FILE`. Default
   `pbcopy` is the only egress; `p2ai run` is the recommended path for tools
   that need an env-var.
-- `otp` no longer accepts `--export` or `--print` — pbcopy only.
-- `attachment` no longer accepts `--export` or `--print` — `-o FILE` (binary
+- `otp` no longer accepts `--export` or `--print`, pbcopy only.
+- `attachment` no longer accepts `--export` or `--print`, `-o FILE` (binary
   blobs) and `--pbcopy` (text) are the only paths.
-- `gtoken` no longer accepts `--export` or `--print` — pbcopy only.
+- `gtoken` no longer accepts `--export` or `--print`, pbcopy only.
 - `cmd_run` exit codes propagate from the child via standard subshell
   semantics, including SIGINT (130).
 - Section 14 of the security suite (peer-UID check) is now an honest SKIP
@@ -75,12 +75,12 @@ or write a small shell script and run it via `p2ai run -- bash script.sh`.
 - README: install pin bumped to v0.5.0; daily-use section leads with `p2ai
   run` examples.
 
-## [0.4.0] — 2026-05-06
+## [0.4.0] - 2026-05-06
 
 ### BREAKING
 
 - **`--print` removed** from `fetch`, `otp`, `gtoken`, and `attachment`. Stdout
-  dumps land in AI-agent transcripts (Claude Code, Cursor, etc.) — that is the
+  dumps land in AI-agent transcripts (Claude Code, Cursor, etc.), that is the
   exact leak path this tool was built to prevent. The wrapper now refuses
   `--print` with a pointer to the safe alternatives.
 - **`-o FILE` removed from `fetch`**. Disk writes leave artefacts requiring
@@ -116,7 +116,7 @@ p2ai attachment 'X' 'cred.json' -o ./cred.json
 ### Added
 
 - `--export VAR` on `otp` and `attachment` (was `fetch`-only before).
-- Security test suite at `tests/security.sh` — 28 checks covering filesystem
+- Security test suite at `tests/security.sh`, 28 checks covering filesystem
   permissions, master-password isolation, cache invalidation, idle TTL, lock
   semantics, payload caps, concurrent connections, signal handling, and
   `--print`/`-o FILE` refusal.
@@ -149,28 +149,28 @@ p2ai attachment 'X' 'cred.json' -o ./cred.json
 - New debugging rule: never bypass the wrapper to debug; use env-var capture
   with grep against `$VAR` so only booleans / metrics reach the transcript.
 
-## [0.3.0] — 2026-05-06
+## [0.3.0] - 2026-05-06
 
 ### Added
 
 - Full keepassxc-cli command parity:
-  - `p2ai rm <entry> [-f]` — delete entry (confirms unless `-f`)
-  - `p2ai edit <entry> [-u/--url/--notes/-t/-g/-p]` — update fields, rename, rotate
-  - `p2ai mv <entry> <group>` — move between groups
-  - `p2ai otp <entry>` — fetch current TOTP code
+  - `p2ai rm <entry> [-f]`: delete entry (confirms unless `-f`)
+  - `p2ai edit <entry> [-u/--url/--notes/-t/-g/-p]`: update fields, rename, rotate
+  - `p2ai mv <entry> <group>`: move between groups
+  - `p2ai otp <entry>`: fetch current TOTP code
 - Per-entry agent cache mode: `p2ai unlock --mode per-entry` keeps the master
   password out of long-lived RAM. Each *new* entry needs a fresh Touch-ID;
   already-fetched entries are cached until idle expires.
 - Screen-lock and screensaver auto-lock subscribers in the agent (already
   present from v0.2 but documented).
 
-## [0.2] — earlier
+## [0.2] - earlier
 
 - Native Swift binaries (`p2ai-master`, `p2ai-agent`) replacing shell-script
   master handling. Strict B-strict agent semantics, locale-aware Touch-ID
   reasons, native DB picker.
 
-## [0.1] — initial
+## [0.1] - initial
 
 - First release. Bash wrapper around `keepassxc-cli` with Touch-ID gate via
   macOS Keychain + `LAContext`.
