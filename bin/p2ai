@@ -1216,10 +1216,11 @@ cmd_install_skill() {
   fi
 
   # Resolve both paths to canonical form to detect self-link
-  local src_canon dest_canon
+  local src_canon dest_canon dest_real
   src_canon="$(cd "$(dirname "$skill_md")" 2>/dev/null && pwd)/$(basename "$skill_md")"
-  dest_canon="$(cd "$dest_dir" 2>/dev/null && pwd)/SKILL.md"
-  if [[ "$src_canon" == "$dest_canon" ]]; then
+  dest_real="$(cd "$dest_dir" 2>/dev/null && pwd || true)"
+  dest_canon="${dest_real}/SKILL.md"
+  if [[ -n "$dest_real" && "$src_canon" == "$dest_canon" ]]; then
     printf 'p2ai: SKILL.md already at %s (repo lives in skills dir, no symlink needed)\n' "$dest" >&2
     return 0
   fi
