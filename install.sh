@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Passwort2AI installer — compile Swift sources, codesign, symlink to ~/.local/bin.
+# Passwort2AI installer — compile, install, wire up agents, run setup.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,22 +7,66 @@ TARGET="${1:-$HOME/.local/bin}"
 SRC="$SCRIPT_DIR/src"
 BIN="$SCRIPT_DIR/bin"
 
-mkdir -p "$TARGET" "$BIN"
+# ── Helpers ───────────────────────────────────────────────────────────────────
+header() { printf '\n  ══ %s ══\n' "$*"; }
+step()   { printf '  ✓ %s\n' "$*"; }
+warn()   { printf '  ⚠ %s\n' "$*"; }
+ask()    { printf '\n  %s [Y/n] ' "$*"; read -r ans; [[ "${ans:-y}" =~ ^[yY]$ ]]; }
 
-# Bash CLI is not compiled, just chmod
-chmod +x "$BIN/p2ai"
+printf '\n'
+printf '  ┌─────────────────────────────────────────────────────────────┐\n'
+printf '  │  Passwort2AI by Fingerprint — Installer                    │\n'
+printf '  └─────────────────────────────────────────────────────────────┘\n'
 
-# macOS sanity check
+# ── macOS check ───────────────────────────────────────────────────────────────
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  printf 'Warning: this tool only runs on macOS (LAContext + Keychain).\n'
+  warn "This tool only runs on macOS (Touch ID + Keychain)."
+  exit 1
 fi
 
-# Compile Swift sources to native arm64/x86_64 binaries with bundle name
-# "Passwort2AI" so Touch-ID dialog shows "Passwort2AI is trying to: …" instead
-# of "swift is trying to: …".
-if command -v swiftc >/dev/null 2>&1; then
-  PLIST="$(mktemp -t p2ai-info.XXXXXX.plist)"
-  cat > "$PLIST" <<'EOF'
+# ── keepassxc-cli ─────────────────────────────────────────────────────────────
+header "Step 1/4: Dependencies"
+if ! command -v keepassxc-cli >/dev/null 2>&1 && \
+   [[ ! -x "/opt/homebrew/bin/keepassxc-cli" && ! -x "/usr/local/bin/keepassxc-cli" && \
+      ! -x "/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli" ]]; then
+  if command -v brew >/dev/null 2>&1; then
+    printf '  Installing KeePassXC via Homebrew...\n'
+    brew install --cask keepassxc
+    step "KeePassXC installed"
+  else
+    warn "keepassxc-cli not found and brew not available."
+    warn "Install manually: https://keepassxc.org/download/"
+    exit 1
+  fi
+else
+  step "KeePassXC found"
+fi
+
+# Touch ID check
+if command -v bioutil >/dev/null 2>&1; then
+  if bioutil -c 2>/dev/null | grep -q '0 biometric'; then
+    warn "No fingerprint enrolled."
+    printf '  → System Settings → Touch ID & Password → Add Fingerprint\n'
+    exit 1
+  else
+    step "Touch ID ready"
+  fi
+fi
+
+# ── Compile ───────────────────────────────────────────────────────────────────
+header "Step 2/4: Compiling"
+mkdir -p "$TARGET"
+mkdir -p "$BIN"
+chmod +x "$BIN/p2ai"
+
+if ! command -v swiftc >/dev/null 2>&1; then
+  warn "swiftc not found. Install Xcode Command Line Tools:"
+  printf '  xcode-select --install\n'
+  exit 1
+fi
+
+PLIST="$(mktemp -t p2ai-info.XXXXXX.plist)"
+cat > "$PLIST" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -36,40 +80,67 @@ if command -v swiftc >/dev/null 2>&1; then
 </plist>
 EOF
 
-  for name in p2ai-master p2ai-agent; do
-    if [[ ! -f "$SRC/$name.swift" ]]; then
-      printf 'Error: %s/%s.swift missing.\n' "$SRC" "$name" >&2; exit 1
-    fi
-    printf 'Compiling %s …\n' "$name"
-    swiftc "$SRC/$name.swift" -o "$BIN/$name" -O \
-      -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PLIST"
-    codesign -s - --force "$BIN/$name" 2>/dev/null || true
-  done
-  rm -f "$PLIST"
-else
-  printf 'Error: swiftc not found. Install Xcode Command Line Tools:\n  xcode-select --install\n' >&2
-  exit 1
-fi
+for name in p2ai-master p2ai-agent; do
+  [[ -f "$SRC/$name.swift" ]] || { printf '  Error: %s/%s.swift missing.\n' "$SRC" "$name" >&2; exit 1; }
+  printf '  Compiling %s …\n' "$name"
+  swiftc "$SRC/$name.swift" -o "$BIN/$name" -O \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PLIST"
+  codesign -s - --force "$BIN/$name" 2>/dev/null || true
+done
+rm -f "$PLIST"
 
 ln -sf "$BIN/p2ai-master" "$TARGET/p2ai-master"
 ln -sf "$BIN/p2ai-agent"  "$TARGET/p2ai-agent"
 ln -sf "$BIN/p2ai"        "$TARGET/p2ai"
+step "Binaries installed → $TARGET"
 
-printf 'Installed:\n  %s/p2ai\n  %s/p2ai-master\n  %s/p2ai-agent\n\n' "$TARGET" "$TARGET" "$TARGET"
-
+# ── PATH ──────────────────────────────────────────────────────────────────────
 case ":$PATH:" in
-  *":$TARGET:"*) ;;
-  *) printf 'Warning: %s is not in $PATH. Add to your shell rc:\n  export PATH="%s:$PATH"\n\n' "$TARGET" "$TARGET" ;;
+  *":$TARGET:"*) step "PATH already set" ;;
+  *)
+    SHELL_RC=""
+    if [[ -f "$HOME/.zshrc" ]];  then SHELL_RC="$HOME/.zshrc"
+    elif [[ -f "$HOME/.bashrc" ]]; then SHELL_RC="$HOME/.bashrc"
+    elif [[ -f "$HOME/.bash_profile" ]]; then SHELL_RC="$HOME/.bash_profile"
+    fi
+    if [[ -n "$SHELL_RC" ]]; then
+      printf '\nexport PATH="%s:$PATH"\n' "$TARGET" >> "$SHELL_RC"
+      step "Added $TARGET to PATH in $SHELL_RC"
+      export PATH="$TARGET:$PATH"
+    else
+      warn "Could not find shell rc. Add manually: export PATH=\"$TARGET:\$PATH\""
+    fi
+    ;;
 esac
 
-if [[ ! -x "$HOME/bin/keepassxc-cli" && ! -x "/opt/homebrew/bin/keepassxc-cli" && ! -x "/usr/local/bin/keepassxc-cli" && ! -x "/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli" ]] && ! command -v keepassxc-cli >/dev/null 2>&1; then
-  printf 'Warning: keepassxc-cli not detected. Install:\n  brew install --cask keepassxc\n'
+# ── Claude Code skill ─────────────────────────────────────────────────────────
+header "Step 3/4: AI Agent Integration"
+CLAUDE_SKILLS="$HOME/.claude/skills"
+if [[ -d "$HOME/.claude" ]]; then
+  mkdir -p "$CLAUDE_SKILLS"
+  ln -sf "$SCRIPT_DIR/SKILL.md" "$CLAUDE_SKILLS/passwort2ai.md"
+  step "Claude Code skill installed → $CLAUDE_SKILLS/passwort2ai.md"
+else
+  step "Claude Code not detected — skipping skill install"
 fi
 
-if command -v bioutil >/dev/null 2>&1; then
-  if bioutil -c 2>/dev/null | grep -q '0 biometric'; then
-    printf 'Notice: no fingerprints enrolled. Open:\n  System Settings → Touch ID & Password → Add Fingerprint\n'
-  fi
+printf '\n  For other agents, run once per project:\n'
+printf '    Cursor:  p2ai system-prompt --target cursor >> .cursorrules\n'
+printf '    Cline:   p2ai system-prompt --target cline  >> .clinerules\n'
+printf '    Aider:   p2ai system-prompt --target aider  >> .aider.conf.yml\n'
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+header "Step 4/4: First-Time Setup"
+printf '\n  p2ai setup will:\n'
+printf '    • Ask you to choose a master password\n'
+printf '    • Show a macOS dialog → click "Always Allow"\n'
+printf '    • Create your password database automatically\n'
+
+if ask "Run p2ai setup now?"; then
+  printf '\n'
+  "$TARGET/p2ai" setup
+else
+  printf '\n  Run manually when ready: p2ai setup\n'
 fi
 
-printf '\nNext steps:\n  1. p2ai setup           # one-time master enrollment\n  2. p2ai unlock          # Touch-ID, master cached in agent (5min idle)\n  3. p2ai fetch "<entry>" # cached → no Touch-ID until idle expires\n'
+printf '\n  ✓ All done. Try: p2ai unlock && p2ai add "My First Entry"\n\n'
