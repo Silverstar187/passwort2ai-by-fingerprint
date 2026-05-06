@@ -22,11 +22,10 @@ p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
 
 **One tap instead of two keystrokes. Zero leaks instead of leaks every time.**
 
-| Workflow | Keystrokes | Leak vectors |
-|---|---|---|
-| Paste into chat | `Cmd+Tab`, `Cmd+C`, `Cmd+Tab`, `Cmd+V` | transcript, server logs, training data |
-| `pbpaste` to AI | one `Cmd+C` plus the prompt | clipboard history, Universal Clipboard |
-| **`p2ai run`** | **1 Touch-ID tap** | **0** |
+|  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
+|---|---|---|---|
+| **Keystrokes** | `Cmd+Tab`, `Cmd+C`, `Cmd+Tab`, `Cmd+V` (4) | one `Cmd+C` plus the prompt | **1 Touch-ID tap** |
+| **Leak vectors** | transcript, server logs, training data | clipboard history, Universal Clipboard | **0** |
 
 ## Install
 
