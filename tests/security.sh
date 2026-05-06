@@ -241,10 +241,42 @@ got=$("$P2AI" run -e _U='PrintGuard'::UserName -- bash -c 'printf "%s" "$_U"' 2>
 
 section "14. Socket peer-UID check"
 
-# Real cross-UID testing needs a second user account, which we don't have in
-# unattended CI. The symbol-presence check is too weak (false positives if
-# the linker keeps unused refs), so we just acknowledge the gap honestly.
-skip "cross-UID rejection requires a second user account — verify via src/p2ai-agent.swift (look for getpeereid() and the uid != getuid() reject branch)"
+# Real cross-UID testing requires a second user account. Set P2AI_TEST_PEER_UID=1
+# to enable (CI sets this; needs sudo to create+remove a temp user via sysadminctl).
+if [[ "${P2AI_TEST_PEER_UID:-0}" != "1" ]]; then
+  skip "cross-UID test (set P2AI_TEST_PEER_UID=1 + sudo to enable)"
+elif ! command -v sysadminctl >/dev/null 2>&1 || ! sudo -n true 2>/dev/null; then
+  skip "cross-UID test needs sysadminctl + passwordless sudo"
+else
+  TESTUSER="p2aitest$$"
+  TESTUID=$((RANDOM % 1000 + 8000))
+  cleanup_user() {
+    sudo dscl . -delete "/Users/$TESTUSER" 2>/dev/null || true
+    sudo rm -rf "/Users/$TESTUSER" 2>/dev/null || true
+  }
+  trap 'pkill -f "$AGENT_BIN" 2>/dev/null; cleanup_user; rm -rf "$TESTDIR"' EXIT
+
+  # Create a low-privilege user (no admin, no shell login)
+  if sudo sysadminctl -addUser "$TESTUSER" -UID "$TESTUID" -password "x" -shell /usr/bin/false 2>/dev/null; then
+    start_agent session
+    # Make state dir traversable so the other user can at least try to connect
+    sudo chmod 755 "$P2AI_STATE_DIR" 2>/dev/null
+    sudo chmod 644 "$P2AI_STATE_DIR/agent.sock" 2>/dev/null
+    # Try to connect as the other user — must be rejected by getpeereid() check
+    OTHER_RESP=$(sudo -u "$TESTUSER" bash -c "echo STATUS | nc -U '$P2AI_STATE_DIR/agent.sock' 2>&1" || true)
+    if [[ -z "$OTHER_RESP" ]] || echo "$OTHER_RESP" | grep -qiE "denied|refused|forbidden|reject|err"; then
+      pass "agent rejects connection from different UID (got: '${OTHER_RESP:-empty}')"
+    else
+      fail "agent accepted connection from UID $TESTUID — getpeereid() check broken: $OTHER_RESP"
+    fi
+    # Restore mode for rest of suite
+    chmod 700 "$P2AI_STATE_DIR" 2>/dev/null
+    chmod 600 "$P2AI_STATE_DIR/agent.sock" 2>/dev/null
+    cleanup_user
+  else
+    skip "could not create test user (sysadminctl failed)"
+  fi
+fi
 
 section "15. Lock clears all cached secrets"
 

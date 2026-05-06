@@ -1,0 +1,49 @@
+name: Tests
+
+# Runs the security test suite on every push + PR.
+# Builds the Swift agent + master, then executes tests/security.sh.
+# On macos-latest, also runs the cross-UID test that needs a temp user account.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-14, macos-13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install keepassxc-cli
+        run: brew install --cask keepassxc
+
+      - name: Compile Swift binaries
+        run: |
+          mkdir -p bin
+          swiftc src/p2ai-master.swift -o bin/p2ai-master -O
+          swiftc src/p2ai-agent.swift  -o bin/p2ai-agent  -O
+          chmod +x bin/p2ai-master bin/p2ai-agent bin/p2ai
+
+      - name: Set up passwordless sudo for peer-UID test
+        # Only on macos-15: enable cross-UID test by allowing passwordless sudo
+        # for sysadminctl and dscl. macos-14/13 stay with the SKIP fallback.
+        if: matrix.os == 'macos-15'
+        run: |
+          echo "${USER} ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/p2ai-test
+          sudo chmod 0440 /etc/sudoers.d/p2ai-test
+
+      - name: Run security suite
+        env:
+          SECTEST_FAST: "1"
+          P2AI_TEST_PEER_UID: ${{ matrix.os == 'macos-15' && '1' || '0' }}
+        run: ./tests/security.sh
