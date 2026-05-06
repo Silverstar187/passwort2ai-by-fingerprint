@@ -76,6 +76,9 @@ p2ai_reason() {
     add:de)     printf 'Eintrag "%s" hinzufügen' "$arg" ;;
     add:fr)     printf 'Ajouter l\047entrée "%s"' "$arg" ;;
     add:*)      printf 'Add "%s"' "$arg" ;;
+    attachment:de) printf 'Anhang von "%s" abrufen' "$arg" ;;
+    attachment:fr) printf 'Récupérer la pièce jointe de "%s"' "$arg" ;;
+    attachment:*)  printf 'Fetch attachment of "%s"' "$arg" ;;
     list:de)    printf 'Einträge auflisten' ;;
     list:fr)    printf 'Lister les entrées' ;;
     list:*)     printf 'List entries' ;;
@@ -249,6 +252,74 @@ cmd_list() {
   master=""
 }
 
+cmd_attachment() {
+  local entry="" name="" outfile="" mode="auto"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o|--output)  outfile="${2:?}"; mode="file"; shift 2 ;;
+      --print|-p)   mode="print"; shift ;;
+      --pbcopy|-c)  mode="pbcopy"; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai attachment <entry> [<attachment-name>] [options]
+  no name              → list attachment names of entry
+  <name>               → export to stdout (default if attachment is text)
+  <name> -o FILE       → export to file
+  <name> --pbcopy      → copy to clipboard (auto-clear)
+  <name> --print       → force stdout even if binary
+USAGE
+        return 0 ;;
+      -*) die "unknown attachment flag: $1" ;;
+      *)  if [[ -z "$entry" ]]; then entry="$1"
+          elif [[ -z "$name" ]]; then name="$1"
+          else die "extra arg: $1"; fi
+          shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai attachment <entry> [<name>] [-o FILE | --print | --pbcopy]"
+  require_db
+  local kpcli; kpcli=$(resolve_kpcli)
+  local master; master=$(fetch_master "$(p2ai_reason attachment "$entry")") || die "auth failed"
+
+  if [[ -z "$name" ]]; then
+    # List attachments
+    printf '%s\n' "$master" | "$kpcli" show --show-attachments "$P2AI_DB" "$entry" 2>/dev/null \
+      | awk '/^Attachments:/{f=1; next} f && /^[[:space:]]+/{print substr($0, index($0,$1))}'
+    master=""
+    return 0
+  fi
+
+  if [[ "$mode" == "file" ]]; then
+    printf '%s\n' "$master" | "$kpcli" attachment-export "$P2AI_DB" "$entry" "$name" "$outfile" 2>&1 | tail -1
+    master=""
+    [[ -r "$outfile" ]] && printf 'p2ai: saved → %s (%s bytes)\n' "$outfile" "$(wc -c < "$outfile" | tr -d ' ')" >&2
+    return 0
+  fi
+
+  # Default mode: depends on size + content type. Fetch to memory.
+  local content
+  content=$(printf '%s\n' "$master" | "$kpcli" attachment-export --stdout "$P2AI_DB" "$entry" "$name" 2>/dev/null) || die "attachment '$name' not found in '$entry'"
+  master=""
+  [[ -n "$content" ]] || die "attachment '$name' empty"
+
+  case "$mode" in
+    print)   printf '%s\n' "$content" ;;
+    pbcopy)
+      printf '%s' "$content" | pbcopy
+      printf 'p2ai: attachment %s/%s in clipboard, auto-clear in %ss.\n' "$entry" "$name" "$P2AI_CLEAR_SECONDS" >&2
+      ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$content" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
+      disown
+      ;;
+    auto)
+      # Heuristic: if content looks text (no NULs in first 8KB), print; else require explicit mode
+      if printf '%s' "${content:0:8192}" | LC_ALL=C grep -q $'\0'; then
+        die "attachment '$name' is binary — use -o FILE to save"
+      fi
+      printf '%s\n' "$content"
+      ;;
+  esac
+}
+
 cmd_add() {
   local entry="" user="" url="" notes="" gen_len="" prompt_pw=0
   while [[ $# -gt 0 ]]; do
@@ -330,8 +401,11 @@ cmd_fetch() {
   reason=$(p2ai_reason fetch "$entry")
   local master; master=$(fetch_master "$reason") || die "auth failed"
 
+  # No `tail -1` — chops multiline attrs (Notes, custom fields). keepassxc-cli
+  # `show -s -a X` outputs the raw value (no prompt with -s). Bash $() trims
+  # trailing newlines automatically.
   local secret
-  secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null | tail -1) || die "entry not found: $entry"
+  secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) || die "entry not found: $entry"
   master=""
   [[ -n "$secret" ]] || die "empty value for $entry / $attr"
 
@@ -364,10 +438,11 @@ cmd_fetch() {
 main() {
   local cmd="${1:-}"; [[ $# -gt 0 ]] && shift || true
   case "$cmd" in
-    setup)            cmd_setup "$@" ;;
-    fetch|f|get)      cmd_fetch "$@" ;;
-    add|new)          cmd_add "$@" ;;
-    list|ls)          cmd_list "$@" ;;
+    setup)                  cmd_setup "$@" ;;
+    fetch|f|get)            cmd_fetch "$@" ;;
+    add|new)                cmd_add "$@" ;;
+    attachment|attach|att)  cmd_attachment "$@" ;;
+    list|ls)                cmd_list "$@" ;;
     unlock|u)         cmd_unlock "$@" ;;
     lock|l)           cmd_lock "$@" ;;
     status|s)         cmd_status "$@" ;;

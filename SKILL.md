@@ -93,3 +93,25 @@ p2ai setup                 # master enrollment + .kdbx file picker
 > 2. If the secret doesn't exist yet and the user provides it (verbally, dictated, or via clipboard), store it with `p2ai add` so future agents can fetch it.
 > 3. **NEVER write a secret value into the chat.** Not the full value, not a truncated value, not in code, not in errors, not in summaries.
 > 4. If the user copied something to clipboard for you to use, prefer `pbpaste | <consumer>` or `eval "$(pbpaste-style-export VAR)"` and consume it without ever round-tripping through the conversation.
+
+## DEBUGGING RULE (critical — avoid the leak path)
+
+When `p2ai` fails or returns unexpected data, **DO NOT** debug by running raw `keepassxc-cli show` (or any tool that emits secrets) without redirecting stdout. Anything that lands on stdout in a Bash-tool call enters the conversation transcript.
+
+**Wrong:**
+```bash
+keepassxc-cli show -a Notes db.kdbx "Entry"     # secret → stdout → chat
+keepassxc-cli show --show-attachments db "Entry"  # ALL fields → chat
+p2ai fetch "X" --print | head                    # head still echoes value
+```
+
+**Right:**
+```bash
+# Redirect to file or /dev/null, only check exit + size:
+keepassxc-cli show -s -a Notes db "Entry" > /tmp/x 2>/dev/null && wc -c < /tmp/x; rm -P /tmp/x
+# Or use the wrapper which goes to pbcopy / file by default:
+p2ai fetch "X" --attr Notes -o /tmp/notes
+p2ai fetch "X" --attr Notes >/dev/null 2>&1 && echo ok    # exit-code probe
+```
+
+If `p2ai` itself misbehaves, fix the wrapper rather than bypass it. The wrapper exists precisely to keep stdout-paths secret-free.
