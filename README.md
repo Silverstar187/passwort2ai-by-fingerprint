@@ -24,6 +24,29 @@ Passwort2AI removes both. The agent invokes `p2ai fetch '<entry>'`. You touch th
 
 **Net effect:** secrets stay in your KeePass DB. Your AI transcripts stay clean. Your finger is the only thing exposed.
 
+## What this actually is
+
+**One-sentence pitch:** ssh-agent for KeePass with Touch-ID, so AI agents can fetch secrets without chat-leak.
+
+A Touch-ID-gated wrapper around `keepassxc-cli`. Your master password lives in the macOS Keychain (released only via `LAContext`). An optional short-lived agent caches the master and per-entry values in RAM so repeat fetches skip the Touch-ID prompt — exact same model as `ssh-agent` or `sudo` cache.
+
+**Built for two audiences:**
+
+- **You at the terminal** — `p2ai fetch "AWS Token"` instead of opening the KeePass GUI to copy a value.
+- **AI coding agents** (Claude Code, Cursor, Copilot, etc.) — they call `p2ai fetch '<entry>'` instead of asking you to paste the secret. The token reaches the env-var or pipe it needs without ever crossing the chat transcript.
+
+**Covers the full KeePassXC CLI surface, Touch-ID gated:**
+
+- Read: `fetch`, `list`, `otp` (TOTP), `attachment`, `gtoken` (mints Google OAuth tokens from a SA-JSON stored in entry Notes)
+- Write: `add`, `edit`, `rm`, `mv`
+- Session cache: `unlock` (session or per-entry mode), `status`, `lock`
+
+**What this is NOT:**
+
+- Not a replacement for your KeePass database — the `.kdbx` is still the source of truth.
+- Not a new cryptography stack — all decryption goes through `keepassxc-cli`.
+- Not host hardening — if your machine is compromised, neither the agent's RAM nor the clipboard help. See [Caveats](#caveats--what-this-tool-does-not-protect-against).
+
 ## Setup (3 steps)
 
 ```bash
