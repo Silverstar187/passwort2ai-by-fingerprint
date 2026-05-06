@@ -84,13 +84,12 @@ p2ai setup
 
 ### Modes
 
-| | Default | `p2ai unlock` | `p2ai unlock --mode per-entry` |
+|  | **Strict** | **Per Entry** | **Auto** |
 |---|---|---|---|
-| **Touch-ID** | every fetch | once for 5 min | once per new secret |
-| **Master cached** | — | yes | — |
-| **Fetches cached** | — | yes | yes |
+| Touch-ID | every fetch | once per password | once per session |
+| Command | _(default)_ | `p2ai unlock --mode per-entry` | `p2ai unlock` |
 
-Auto-locks on screen-lock or `p2ai lock`.
+Session ends on screen lock, 5 min idle, or `p2ai lock`.
 
 ## Daily use
 
