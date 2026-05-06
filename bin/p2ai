@@ -115,10 +115,30 @@ agent_send() {
   printf '%s\n' "$cmd" | nc -U "$P2AI_SOCK" 2>/dev/null
 }
 
+# Send command + raw payload to agent (for PUTENTRY).
+# agent_send_with_body "PUTENTRY foo:Password" <<< "$secret"
+agent_send_with_body() {
+  local cmd="$1"
+  agent_running || return 1
+  { printf '%s\n' "$cmd"; cat; } | nc -U "$P2AI_SOCK" 2>/dev/null
+}
+
+agent_mode() {
+  agent_send "MODE" 2>/dev/null | tr -d '\n'
+}
+
 # fetch_master <reason>
-# Returns master via stdout. Uses agent if running, else Touch-ID.
+# Returns master via stdout. Asks agent first; on MISS does Touch-ID.
+# In per-entry mode the agent never returns master, so we always Touch-ID.
 fetch_master() {
   local reason="${1:-unlock KeePass master}"
+  if agent_running; then
+    local resp; resp=$(agent_send "GET")
+    if [[ -n "$resp" && "$resp" != "MISS" ]]; then
+      printf '%s' "$resp"
+      return 0
+    fi
+  fi
   "$P2AI_MASTER_BIN" --reason "$reason"
 }
 
@@ -171,32 +191,43 @@ cmd_setup() {
 }
 
 cmd_unlock() {
-  local ttl="$P2AI_AGENT_TTL"
+  local ttl="$P2AI_AGENT_TTL" mode="session"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ttl|-t) ttl="${2:?}"; shift 2 ;;
-      *) die "unknown unlock arg: $1" ;;
+      --ttl|-t)  ttl="${2:?}"; shift 2 ;;
+      --mode|-m) mode="${2:?}"; shift 2 ;;
+      session|per-entry) mode="$1"; shift ;;
+      *) die "unknown unlock arg: $1 (try --mode session|per-entry --ttl SEC)" ;;
     esac
   done
+  case "$mode" in session|per-entry) ;; *) die "mode must be session or per-entry" ;; esac
+
   mkdir -p "$P2AI_STATE_DIR"
   chmod 700 "$P2AI_STATE_DIR"
   if agent_running; then
     printf 'p2ai: agent already running.\n' >&2
     cmd_status; return
   fi
-  # Touch-ID, get master, spawn agent in background, master via stdin.
-  local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock)") || die "auth failed"
-  ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --ttl "$ttl" >/dev/null 2>&1 ) &
-  disown
-  master=""
-  # Wait briefly for agent to bind socket + write pid
+
+  if [[ "$mode" == "session" ]]; then
+    # Touch-ID upfront; master to agent via stdin
+    local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock)") || die "auth failed"
+    ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --mode session --ttl "$ttl" >/dev/null 2>&1 ) &
+    disown
+    master=""
+  else
+    # per-entry: no upfront Touch-ID, agent ready to cache entries on first fetch
+    ( nohup "$P2AI_AGENT_BIN" --mode per-entry --ttl "$ttl" </dev/null >/dev/null 2>&1 ) &
+    disown
+  fi
+
   local i
   for i in 1 2 3 4 5 6 7 8; do
     agent_running && break
     sleep 0.15
   done
   if agent_running; then
-    printf 'p2ai: agent unlocked, idle TTL %ss.\n' "$ttl" >&2
+    printf 'p2ai: agent unlocked (mode=%s, idle TTL %ss).\n' "$mode" "$ttl" >&2
   else
     die "agent failed to start"
   fi
@@ -489,18 +520,32 @@ cmd_fetch() {
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
 
-  # Touch-ID dialog reason includes entry name so user knows what's asked.
-  local reason
-  reason=$(p2ai_reason fetch "$entry")
-  local master; master=$(fetch_master "$reason") || die "auth failed"
+  local cache_key="${entry}:${attr}"
+  local secret=""
 
-  # No `tail -1` — chops multiline attrs (Notes, custom fields). keepassxc-cli
-  # `show -s -a X` outputs the raw value (no prompt with -s). Bash $() trims
-  # trailing newlines automatically.
-  local secret
-  secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) || die "entry not found: $entry"
-  master=""
-  [[ -n "$secret" ]] || die "empty value for $entry / $attr"
+  # 1. Agent entry-cache hit → no Touch-ID, no kpcli
+  if agent_running; then
+    local cached; cached=$(agent_send "GETENTRY $cache_key")
+    if [[ -n "$cached" && "$cached" != "MISS" ]]; then
+      secret="$cached"
+    fi
+  fi
+
+  if [[ -z "$secret" ]]; then
+    # 2. Cache miss → master (agent or Touch-ID) + kpcli
+    local reason; reason=$(p2ai_reason fetch "$entry")
+    local master; master=$(fetch_master "$reason") || die "auth failed"
+
+    # No `tail -1` — chops multiline attrs (Notes, custom fields).
+    secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) || die "entry not found: $entry"
+    master=""
+    [[ -n "$secret" ]] || die "empty value for $entry / $attr"
+
+    # 3. Push into agent cache for next time (best-effort, no failure if agent down)
+    if agent_running; then
+      printf '%s' "$secret" | agent_send_with_body "PUTENTRY $cache_key" >/dev/null 2>&1 || true
+    fi
+  fi
 
   case "$mode" in
     print|print-noclear)
