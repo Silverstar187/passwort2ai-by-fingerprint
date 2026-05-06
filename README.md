@@ -40,17 +40,45 @@ p2ai unlock
 
 ## Daily use
 
+### Read secrets
+
 ```bash
 p2ai fetch "<entry>"                              # Touch-ID → clipboard → auto-clear 30s
 p2ai fetch "<entry>" --print                      # → stdout (for piping)
+p2ai fetch "<entry>" --attr UserName              # any attribute (default: Password)
 eval "$(p2ai fetch '<entry>' --export TOKEN)"     # → $TOKEN env-var, no disk-touch
-p2ai list <fuzzy>                                 # search entries (Touch-ID gated)
-
-# Session caching (sudo-style — Touch-ID once, fetch many times)
-p2ai unlock [--ttl 300]    # default idle TTL 5min, hard cap 30min absolute
-p2ai status                # show remaining TTL
-p2ai lock                  # clear master from RAM
+p2ai list [query]                                 # search entries (Touch-ID gated)
+p2ai otp "<entry>"                                # current TOTP code → clipboard
+p2ai attachment "<entry>" file.json -o out.json   # export file attachment
+p2ai gtoken "<sa-entry>" --scope drive.readonly   # mint Google OAuth token from SA-JSON
 ```
+
+### Write secrets
+
+```bash
+p2ai add "<entry>" -u USER                        # auto-generate 24-char password
+p2ai add "<entry>" -u USER -g 32                  # custom length
+p2ai add "<entry>" -u USER -p                     # type password in your terminal (not chat)
+p2ai add "<entry>" --url URL --notes TEXT         # extra fields
+
+p2ai edit "<entry>" -g                            # rotate password
+p2ai edit "<entry>" --notes "new"                 # update fields
+p2ai edit "<entry>" -t "New Title"                # rename
+p2ai mv "<entry>" "Group/Subgroup"                # move between groups
+p2ai rm "<entry>" [-f]                            # delete (confirms unless -f)
+```
+
+### Session cache (skip Touch-ID for repeated fetches)
+
+```bash
+p2ai unlock                          # mode=session: master + entries cached, 5min idle TTL
+p2ai unlock --mode per-entry         # paranoid: master never cached; entries cached after first hit
+p2ai unlock --ttl 600                # custom idle TTL (hard cap: 30min absolute)
+p2ai status                          # mode + remaining TTL + cached entry count
+p2ai lock                            # clear everything from RAM
+```
+
+Both modes auto-lock on screen-lock, screensaver start, idle timeout, hard cap, or manual `p2ai lock`.
 
 ## Requirements
 
@@ -62,7 +90,12 @@ p2ai lock                  # clear master from RAM
 
 Master password lives in macOS Keychain. Every `fetch` triggers `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` → Touch-ID dialog. Biometry is the only auth gate. KeePass DB stays encrypted on disk; master is held in memory for one `keepassxc-cli show` call, then cleared. Clipboard auto-clears after 30s (only if it still holds the secret — won't stomp other copies).
 
-When `p2ai unlock` is used, a short-lived agent (`p2ai-agent`) caches the master in process RAM for the configured idle TTL. The agent listens on a Unix socket (mode 600 in a mode-700 directory) and verifies peer UID via `getpeereid()`. It auto-locks on `com.apple.screenIsLocked` / `com.apple.screensaver.didstart` Distributed Notifications, on hard absolute TTL (30 min default), or on `p2ai lock`. Same threat model as `ssh-agent` / `sudo` cache.
+When `p2ai unlock` is used, a short-lived agent (`p2ai-agent`) caches secrets in process RAM for the configured idle TTL. Two modes:
+
+- **`session`** (default): master + per-entry values cached. One Touch-ID at unlock, every subsequent fetch is instant. Same threat model as `ssh-agent` / `sudo` cache.
+- **`per-entry`**: master is **never** cached. New entries require fresh Touch-ID; once fetched, that entry's value is cached until idle expiry. Trades a Touch-ID per *unique* entry for never holding the master in long-lived RAM.
+
+The agent listens on a Unix socket (mode 600 in a mode-700 directory) and verifies peer UID via `getpeereid()` so other users on the box can't talk to it. It auto-locks on `com.apple.screenIsLocked`, `com.apple.screensaver.didstart`, idle TTL, hard absolute TTL (30 min), `p2ai lock`, or any termination signal. `rm`/`edit`/`mv` invalidate cached entries automatically so rotations don't linger.
 
 ## Caveats — what this tool does NOT protect against
 
