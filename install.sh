@@ -95,31 +95,45 @@ ln -sf "$BIN/p2ai"        "$TARGET/p2ai"
 step "Binaries installed → $TARGET"
 
 # ── PATH ──────────────────────────────────────────────────────────────────────
+# Always ensure the export line lives in shell rc, even if $PATH currently
+# contains $TARGET (a transient export in the install shell does NOT persist
+# into new terminals). Idempotent: grep first, append only if missing.
+SHELL_RC=""
+if [[ -n "${ZSH_VERSION:-}" || "${SHELL:-}" == *zsh* ]] && [[ -f "$HOME/.zshrc" ]]; then
+  SHELL_RC="$HOME/.zshrc"
+elif [[ -f "$HOME/.zshrc" ]]; then SHELL_RC="$HOME/.zshrc"
+elif [[ -f "$HOME/.bashrc" ]]; then SHELL_RC="$HOME/.bashrc"
+elif [[ -f "$HOME/.bash_profile" ]]; then SHELL_RC="$HOME/.bash_profile"
+fi
+
+PATH_LINE="export PATH=\"$TARGET:\$PATH\""
+if [[ -n "$SHELL_RC" ]]; then
+  if grep -Fxq "$PATH_LINE" "$SHELL_RC" 2>/dev/null; then
+    step "PATH export already in $SHELL_RC"
+  else
+    printf '\n# Added by passwort2ai installer\n%s\n' "$PATH_LINE" >> "$SHELL_RC"
+    step "Added $TARGET to PATH in $SHELL_RC"
+  fi
+else
+  warn "Could not find shell rc. Add manually: $PATH_LINE"
+fi
 case ":$PATH:" in
-  *":$TARGET:"*) step "PATH already set" ;;
-  *)
-    SHELL_RC=""
-    if [[ -f "$HOME/.zshrc" ]];  then SHELL_RC="$HOME/.zshrc"
-    elif [[ -f "$HOME/.bashrc" ]]; then SHELL_RC="$HOME/.bashrc"
-    elif [[ -f "$HOME/.bash_profile" ]]; then SHELL_RC="$HOME/.bash_profile"
-    fi
-    if [[ -n "$SHELL_RC" ]]; then
-      printf '\nexport PATH="%s:$PATH"\n' "$TARGET" >> "$SHELL_RC"
-      step "Added $TARGET to PATH in $SHELL_RC"
-      export PATH="$TARGET:$PATH"
-    else
-      warn "Could not find shell rc. Add manually: export PATH=\"$TARGET:\$PATH\""
-    fi
-    ;;
+  *":$TARGET:"*) ;;
+  *) export PATH="$TARGET:$PATH" ;;
 esac
 
 # ── Claude Code skill ─────────────────────────────────────────────────────────
+# Claude Code discovers skills as ~/.claude/skills/<name>/SKILL.md (directory),
+# not flat .md files. Link the SKILL.md inside a dir named after the skill.
 header "Step 3/4: AI Agent Integration"
 CLAUDE_SKILLS="$HOME/.claude/skills"
 if [[ -d "$HOME/.claude" ]]; then
-  mkdir -p "$CLAUDE_SKILLS"
-  ln -sf "$SCRIPT_DIR/SKILL.md" "$CLAUDE_SKILLS/passwort2ai.md"
-  step "Claude Code skill installed → $CLAUDE_SKILLS/passwort2ai.md"
+  # Clean up any prior flat-file install from older installers
+  [[ -L "$CLAUDE_SKILLS/passwort2ai.md" || -f "$CLAUDE_SKILLS/passwort2ai.md" ]] \
+    && rm -f "$CLAUDE_SKILLS/passwort2ai.md"
+  mkdir -p "$CLAUDE_SKILLS/passwort2ai"
+  ln -sf "$SCRIPT_DIR/SKILL.md" "$CLAUDE_SKILLS/passwort2ai/SKILL.md"
+  step "Claude Code skill installed → $CLAUDE_SKILLS/passwort2ai/SKILL.md"
 else
   step "Claude Code not detected — skipping skill install"
 fi

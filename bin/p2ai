@@ -230,11 +230,22 @@ cmd_setup() {
     local master; master=$("$P2AI_MASTER_BIN" --reason "Create KeePass database") || {
       printf 'p2ai: Touch-ID cancelled — cannot create DB.\n' >&2; return 1
     }
-    printf '%s\n%s\n' "$master" "$master" | "$kpcli" db-create -p "$existing" >/dev/null 2>&1 || {
+    # Capture stderr to a temp so we can show diagnostic on failure
+    local kp_err; kp_err=$(mktemp -t p2ai-kpcli.XXXXXX)
+    if ! printf '%s\n%s\n' "$master" "$master" | "$kpcli" db-create -p "$existing" >/dev/null 2>"$kp_err"; then
       master=""
-      printf 'p2ai: failed to create DB at %s\n' "$existing" >&2; return 1
-    }
+      printf 'p2ai: failed to create DB at %s\n' "$existing" >&2
+      printf 'p2ai: keepassxc-cli output:\n' >&2
+      sed 's/^/  /' "$kp_err" >&2
+      rm -f "$kp_err"
+      return 1
+    fi
+    rm -f "$kp_err"
     master=""
+    if [[ ! -s "$existing" ]]; then
+      printf 'p2ai: keepassxc-cli reported success but %s is missing/empty.\n' "$existing" >&2
+      return 1
+    fi
     printf '%s' "$existing" > "$P2AI_DB_PATH_FILE"
     chmod 600 "$P2AI_DB_PATH_FILE"
     printf 'p2ai: database created and saved → %s\n' "$existing" >&2
