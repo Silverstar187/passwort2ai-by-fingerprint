@@ -1197,7 +1197,7 @@ cmd_install_skill() {
   fi
 
   if [[ -z "$skill_md" ]] && command -v brew >/dev/null 2>&1; then
-    local prefix; prefix="$(brew --prefix passwort2ai 2>/dev/null || true)"
+    local prefix; prefix="$(brew --prefix 2>/dev/null || true)"
     [[ -n "$prefix" && -r "$prefix/share/passwort2ai/SKILL.md" ]] && skill_md="$prefix/share/passwort2ai/SKILL.md"
   fi
 
