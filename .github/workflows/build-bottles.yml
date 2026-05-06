@@ -32,6 +32,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: macos-26
+            bottle_tag: arm64_tahoe
+          - os: macos-26-intel
+            bottle_tag: tahoe
           - os: macos-15
             bottle_tag: arm64_sequoia
           - os: macos-14
@@ -125,14 +129,18 @@ jobs:
           ROOT_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
           FORMULA="Formula/passwort2ai.rb"
 
-          SHA_SEQUOIA=$(cat /tmp/bottle-sha/arm64_sequoia.sha256 2>/dev/null || echo "")
-          SHA_SONOMA=$(cat   /tmp/bottle-sha/arm64_sonoma.sha256   2>/dev/null || echo "")
-          SHA_VENTURA=$(cat  /tmp/bottle-sha/ventura.sha256        2>/dev/null || echo "")
+          SHA_TAHOE_ARM=$(cat    /tmp/bottle-sha/arm64_tahoe.sha256   2>/dev/null || echo "")
+          SHA_TAHOE=$(cat        /tmp/bottle-sha/tahoe.sha256         2>/dev/null || echo "")
+          SHA_SEQUOIA=$(cat      /tmp/bottle-sha/arm64_sequoia.sha256 2>/dev/null || echo "")
+          SHA_SONOMA=$(cat       /tmp/bottle-sha/arm64_sonoma.sha256  2>/dev/null || echo "")
+          SHA_VENTURA=$(cat      /tmp/bottle-sha/ventura.sha256       2>/dev/null || echo "")
 
           # Build bottle block (only include lines where SHA is present)
           BOTTLE_BLOCK="  bottle do\n    root_url \"${ROOT_URL}\""
-          [[ -n "$SHA_SEQUOIA" ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sequoia: \"${SHA_SEQUOIA}\""
-          [[ -n "$SHA_SONOMA"  ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sonoma:  \"${SHA_SONOMA}\""
+          [[ -n "$SHA_TAHOE_ARM" ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_tahoe:   \"${SHA_TAHOE_ARM}\""
+          [[ -n "$SHA_TAHOE"     ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, tahoe:         \"${SHA_TAHOE}\""
+          [[ -n "$SHA_SEQUOIA"   ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sequoia: \"${SHA_SEQUOIA}\""
+          [[ -n "$SHA_SONOMA"    ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sonoma:  \"${SHA_SONOMA}\""
           [[ -n "$SHA_VENTURA" ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, ventura:       \"${SHA_VENTURA}\""
           BOTTLE_BLOCK+="\n  end"
 
