@@ -14,6 +14,9 @@
 #   p2ai fetch <entry> --print              print to stdout (no pbcopy)
 #   p2ai fetch <entry> --attr UserName      different attribute (default: Password)
 #   p2ai fetch <entry> --export VAR         emit `export VAR=...` (use with eval $(p2ai fetch …))
+#   p2ai add <entry> [-u USER] [-g [LEN]]   add new entry; -g auto-generates pw (default 24c)
+#   p2ai add <entry> -p                     add entry with interactive password prompt
+#   p2ai add <entry> --url URL --notes TXT  add with URL + notes fields
 #   p2ai list [query]                       Touch-ID, list entries (filter optional)
 #   p2ai unlock [--ttl SEC]                 Touch-ID, start agent, master in RAM (default 300s idle)
 #   p2ai lock                               kill agent, clear master from RAM
@@ -70,6 +73,9 @@ p2ai_reason() {
     fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
     fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
     fetch:*)    printf 'Fetch "%s"' "$arg" ;;
+    add:de)     printf 'Eintrag "%s" hinzufügen' "$arg" ;;
+    add:fr)     printf 'Ajouter l\047entrée "%s"' "$arg" ;;
+    add:*)      printf 'Add "%s"' "$arg" ;;
     list:de)    printf 'Einträge auflisten' ;;
     list:fr)    printf 'Lister les entrées' ;;
     list:*)     printf 'List entries' ;;
@@ -243,6 +249,66 @@ cmd_list() {
   master=""
 }
 
+cmd_add() {
+  local entry="" user="" url="" notes="" gen_len="" prompt_pw=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -u|--username)  user="${2:?}"; shift 2 ;;
+      --url)          url="${2:?}"; shift 2 ;;
+      --notes|--note) notes="${2:?}"; shift 2 ;;
+      -g|--generate)  gen_len="${2:-24}"
+                      [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
+                      shift 2 ;;
+      -p|--password)  prompt_pw=1; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai add <entry> [options]
+  -u, --username USER     username for entry
+  --url URL               URL field
+  --notes TEXT            notes field
+  -g, --generate [LEN]    auto-generate password (default length 24)
+  -p, --password          prompt interactively for password (hidden)
+Default if neither -g nor -p: -g 24.
+USAGE
+        return 0 ;;
+      -*) die "unknown add flag: $1" ;;
+      *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai add <entry> [-u user] [-g [LEN]] [-p] [--url URL] [--notes TEXT]"
+  require_db
+  [[ -w "$P2AI_DB" ]] || die "DB not writable: $P2AI_DB"
+  local kpcli; kpcli=$(resolve_kpcli)
+
+  # Default: auto-generate 24-char password
+  if [[ -z "$gen_len" && $prompt_pw -eq 0 ]]; then
+    gen_len=24
+  fi
+
+  local master; master=$(fetch_master "$(p2ai_reason add "$entry")") || die "auth failed"
+
+  # Build keepassxc-cli args
+  local args=(add)
+  [[ -n "$user" ]]  && args+=(-u "$user")
+  [[ -n "$url" ]]   && args+=(--url "$url")
+  [[ -n "$notes" ]] && args+=(--notes "$notes")
+  if [[ -n "$gen_len" ]]; then
+    args+=(-g -L "$gen_len" -l -U -n -s --exclude-similar)
+  elif [[ $prompt_pw -eq 1 ]]; then
+    args+=(-p)
+  fi
+  args+=("$P2AI_DB" "$entry")
+
+  # Run keepassxc-cli — master via stdin, entry-pwd prompt on TTY (if -p)
+  if printf '%s\n' "$master" | "$kpcli" "${args[@]}"; then
+    master=""
+    printf 'p2ai: added "%s" to %s\n' "$entry" "$P2AI_DB" >&2
+  else
+    master=""
+    die "keepassxc-cli add failed"
+  fi
+}
+
 cmd_fetch() {
   local entry="" attr="Password" mode="pbcopy" var=""
   while [[ $# -gt 0 ]]; do
@@ -300,6 +366,7 @@ main() {
   case "$cmd" in
     setup)            cmd_setup "$@" ;;
     fetch|f|get)      cmd_fetch "$@" ;;
+    add|new)          cmd_add "$@" ;;
     list|ls)          cmd_list "$@" ;;
     unlock|u)         cmd_unlock "$@" ;;
     lock|l)           cmd_lock "$@" ;;
