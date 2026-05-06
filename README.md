@@ -1,10 +1,10 @@
-# $\color{#C4905A}{\textsf{Passwort2AI by Fingerprint}}$ 🫆
+# $\color{#8B5CF6}{\textsf{Passwort2AI by Fingerprint}}$ 🫆
 
 <p align="center">
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
 </p>
 
-## $\color{#C4905A}{\textsf{All your passwords in one place. Securely stored, invisible to AI, covered by your fingerprint.}}$
+## $\color{#8B5CF6}{\textsf{All your passwords in one place. Securely stored, invisible to AI, covered by your fingerprint.}}$
 
 You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) wants one.
 
@@ -17,14 +17,14 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 | `.env` files | Annoying, scattered, one of them accidentally committed to another repo somewhere. |
 | "It's in your clipboard" | You have to type that prompt every single time. Value lives in clipboard history and Universal Clipboard. |
 
-### $\color{#C4905A}{\textsf{✅ With p2ai}}$
+### $\color{#8B5CF6}{\textsf{✅ With p2ai}}$
 
 | Option | Upside |
 |---|---|
 | `p2ai run -e VAR='entry' -- cmd` | One Touch-ID tap. Value goes only into the child's env. LLM never sees it. |
 | `p2ai fetch 'entry'` | One Touch-ID tap. Clipboard with auto-clear after 30s. |
 
-$\color{#C4905A}{\textbf{Main advantage: Speed +++ Security ++}}$
+$\color{#8B5CF6}{\textbf{Main advantage: Speed +++ Security ++}}$
 
 |  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
 |---|---|---|---|
