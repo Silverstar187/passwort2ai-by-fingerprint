@@ -1,0 +1,72 @@
+name: Bump Homebrew formula
+
+# Fires when a new release tag is pushed. Opens a PR (or pushes a commit) on
+# Silverstar187/homebrew-p2ai with the new URL + sha256 in the formula.
+#
+# Requires repo secret HOMEBREW_TAP_TOKEN — a fine-grained PAT with:
+#   - Repository access: Silverstar187/homebrew-p2ai
+#   - Permissions: Contents (read & write)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to bump to (e.g. v0.4.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute tarball SHA256
+        id: sha
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          SHA=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: Silverstar187/homebrew-p2ai
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        working-directory: tap
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          FORMULA=Formula/passwort2ai.rb
+
+          sed -i.bak -E "s|^  url \".*\"|  url \"${{ steps.sha.outputs.url }}\"|" "$FORMULA"
+          sed -i.bak -E "s|^  sha256 \"[a-f0-9]+\"|  sha256 \"${{ steps.sha.outputs.sha }}\"|" "$FORMULA"
+          sed -i.bak -E "s|^  version \".*\"|  version \"${VERSION}\"|" "$FORMULA"
+          rm "$FORMULA.bak"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FORMULA"
+          if git diff --cached --quiet; then
+            echo "No formula change."
+            exit 0
+          fi
+          git commit -m "passwort2ai ${VERSION}"
+          git push
