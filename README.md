@@ -19,30 +19,33 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 
 ### ✅ p2ai
 
-| Option | Upside |
-|---|---|
-| 🫆 | Installs with 1 Prompt |
-| 🫆 | In encrypted Database |
-| 🫆 | AI must ask to get secrets |
-| 🫆 | only you can give permission |
-| 🫆 | 2 Seconds to install |
-| 🫆 | 1 Second to paste Password |
-| 🫆 | AI can't see the password, just gets a closed letter |
-| 🫆 | fast mode available |
-| 🫆 | zero retention mode available |
-| 🫆 | never leak again |
-| 🫆 | never search again |
-| 🫆 | all in one place, organized |
-| 🫆 | manageable by AI |
-| 🫆 | import by script |
-| 🫆 | local-first, DB stays on your machine |
-| 🫆 | auto-locks on screen lock |
-| 🫆 | clipboard auto-clears after 30s |
-| 🫆 | TOTP codes too |
-| 🫆 | binary attachments too |
-| 🫆 | auto-generates 24-char passwords |
-| 🫆 | open source, MIT, signed releases |
-| 🫆 | no leak flags, ever |
+<table>
+<tr><th align="center">Option</th><th>Upside</th></tr>
+<tr>
+  <td rowspan="21" align="center" valign="middle"><img src="docs/fingerprint.png" alt="🫆" width="180"></td>
+  <td>Installs with 1 Prompt</td>
+</tr>
+<tr><td>In encrypted Database</td></tr>
+<tr><td>AI must ask to get secrets</td></tr>
+<tr><td>only you can give permission</td></tr>
+<tr><td>2 Seconds to install</td></tr>
+<tr><td>1 Second to paste Password</td></tr>
+<tr><td>AI can't see the password, just gets a closed letter</td></tr>
+<tr><td>fast mode available</td></tr>
+<tr><td>zero retention mode available</td></tr>
+<tr><td>never leak again</td></tr>
+<tr><td>never search again</td></tr>
+<tr><td>all in one place, organized</td></tr>
+<tr><td>manageable by AI</td></tr>
+<tr><td>import by script</td></tr>
+<tr><td>local-first, DB stays on your machine</td></tr>
+<tr><td>auto-locks on screen lock</td></tr>
+<tr><td>clipboard auto-clears after 30s</td></tr>
+<tr><td>TOTP codes too</td></tr>
+<tr><td>binary attachments too</td></tr>
+<tr><td>auto-generates 24-char passwords</td></tr>
+<tr><td>signed releases, MIT, open source</td></tr>
+</table>
 
 **Main advantage: Speed +++ Security ++**
 
