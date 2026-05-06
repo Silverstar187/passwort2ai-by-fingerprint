@@ -63,17 +63,31 @@ func storeMaster() {
     ]
     SecItemDelete(del as CFDictionary)
 
-    let add: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: SERVICE,
-        kSecAttrAccount as String: ACCOUNT,
-        kSecValueData as String: pw.data(using: .utf8)!,
-        kSecAttrLabel as String: "Passwort2AI master (Touch-ID gated)",
-        kSecAttrDescription as String: "KeePass master password",
+    // Use security CLI rather than SecItemAdd so we can pass -T <trusted-app>.
+    // Trusted apps in the ACL list bypass the keychain access password prompt
+    // on read. Without this, every SecItemCopyMatching from an unsigned Swift
+    // binary triggers a "Keychain wants to use confidential info" PW dialog.
+    // Touch-ID via LAContext remains the security gate.
+    let task = Process()
+    task.launchPath = "/usr/bin/security"
+    task.arguments = [
+        "add-generic-password",
+        "-s", SERVICE,
+        "-a", ACCOUNT,
+        "-w", pw,
+        "-U",
+        "-T", "/usr/bin/swift",
+        "-T", "/usr/bin/security",
+        "-l", "Passwort2AI master (Touch-ID gated)",
+        "-D", "KeePass master password",
     ]
-    let status = SecItemAdd(add as CFDictionary, nil)
-    guard status == errSecSuccess else {
-        die("SecItemAdd failed: \(status) (\(SecCopyErrorMessageString(status, nil) as String? ?? "?"))")
+    let errPipe = Pipe()
+    task.standardError = errPipe
+    do { try task.run() } catch { die("security launch failed: \(error)") }
+    task.waitUntilExit()
+    let stderrOut = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    guard task.terminationStatus == 0 else {
+        die("security add-generic-password failed (\(task.terminationStatus)): \(stderrOut)")
     }
     print("Stored.")
 }
