@@ -64,7 +64,11 @@ jobs:
         id: bottle
         run: |
           brew bottle --no-rebuild silverstar187/p2ai/passwort2ai 2>&1 | tee /tmp/bottle_output.txt
-          BOTTLE_FILE=$(ls passwort2ai--*.bottle.tar.gz 2>/dev/null || ls passwort2ai-*.bottle.tar.gz 2>/dev/null)
+          RAW_FILE=$(ls passwort2ai--*.bottle.tar.gz 2>/dev/null || ls passwort2ai-*.bottle.tar.gz 2>/dev/null)
+          # brew bottle outputs `name--version` (2 dashes) but Homebrew downloads
+          # expect `name-version` (1 dash). Rename to match download URL format.
+          BOTTLE_FILE="${RAW_FILE/--/-}"
+          [[ "$RAW_FILE" != "$BOTTLE_FILE" ]] && mv "$RAW_FILE" "$BOTTLE_FILE"
           echo "file=$BOTTLE_FILE" >> "$GITHUB_OUTPUT"
           SHA=$(shasum -a 256 "$BOTTLE_FILE" | awk '{print $1}')
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
