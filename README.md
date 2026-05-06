@@ -1,7 +1,11 @@
 # Passwort2AI by Fingerprint 🫆
 
 <p align="center">
-  <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
+  <img src="docs/demo.svg" alt="p2ai demo: AI agent runs aws sts with a Touch-ID-gated AWS key, secret never enters chat" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="320">
 </p>
 
 ## All your passwords in one place. Securely stored, invisible to AI, covered by your fingerprint.
