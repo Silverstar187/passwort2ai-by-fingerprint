@@ -324,6 +324,26 @@ echo "$out" | grep -q "invalid --env" \
   && pass "malformed --env rejected" \
   || fail "malformed --env not caught: $out"
 
+# 17i. --env-file dotenv parser — load mappings from file
+ENVF="$TESTDIR/test.env"
+cat > "$ENVF" <<EOF
+# comment ignored
+A='RunGuard'
+B="RunGuard"
+C=RunGuard::UserName
+EOF
+got=$("$P2AI" run -f "$ENVF" -- bash -c 'echo "A=${#A} B=${#B} C=$C"')
+[[ "$got" == "A=24 B=24 C=runuser" ]] \
+  && pass "--env-file dotenv parser loads quoted + unquoted + ::attr" \
+  || fail "env-file parsing wrong: $got"
+
+# 17j. malformed env-file rejected
+echo "garbage_no_equals" > "$TESTDIR/bad.env"
+out=$("$P2AI" run -f "$TESTDIR/bad.env" -- echo x 2>&1)
+echo "$out" | grep -q "not parseable" \
+  && pass "malformed env-file refused" \
+  || fail "env-file parser too permissive"
+
 # 17h. Signal-forwarding — Ctrl+C / SIGTERM to p2ai must reach the child
 "$P2AI" run -e _=RunGuard -- sleep 30 &
 RUN_PID=$!

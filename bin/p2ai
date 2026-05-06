@@ -157,7 +157,8 @@ agent_mode() {
 
 # fetch_master <reason>
 # Returns master via stdout. Asks agent first; on MISS does Touch-ID.
-# In per-entry mode the agent never returns master, so we always Touch-ID.
+# Touch-ID prompt is bounded by $P2AI_AUTH_TIMEOUT (default 30s) so an
+# unattended laptop doesn't hang an AI-agent loop forever.
 fetch_master() {
   local reason="${1:-unlock KeePass master}"
   if agent_running; then
@@ -167,7 +168,23 @@ fetch_master() {
       return 0
     fi
   fi
-  "$P2AI_MASTER_BIN" --reason "$reason"
+  local timeout="${P2AI_AUTH_TIMEOUT:-30}"
+  # Process-substitution fd → read -t with -d '' so we get the FULL master
+  # (including any embedded newlines) up to EOF or the timeout, never
+  # touching disk. read returns nonzero on EOF-without-delim but $master
+  # is populated — we check the var, not the rc.
+  exec 9< <("$P2AI_MASTER_BIN" --reason "$reason")
+  local master=""
+  IFS= read -r -t "$timeout" -d '' master <&9 || true
+  exec 9<&-
+  if [[ -n "$master" ]]; then
+    # Strip a single trailing newline if present (Swift print() adds one)
+    [[ "${master: -1}" == $'\n' ]] && master="${master%$'\n'}"
+    printf '%s' "$master"
+    return 0
+  fi
+  printf 'p2ai: Touch-ID timeout after %ss — user idle?\n' "$timeout" >&2
+  return 1
 }
 
 
@@ -842,6 +859,34 @@ USAGE
   disown
 }
 
+# Parse dotenv-style file. Lines: KEY=value, KEY='value', KEY="value".
+# Comments (#) and blank lines ignored. Appends to the array named in $2.
+_p2ai_load_env_file() {
+  local file="$1" arrayname="$2"
+  [[ -r "$file" ]] || die "env-file not readable: $file"
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Strip leading/trailing whitespace, skip comments + blank
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      # Strip surrounding single or double quotes if present
+      if [[ "$val" =~ ^\'(.*)\'$ ]]; then
+        val="${BASH_REMATCH[1]}"
+      elif [[ "$val" =~ ^\"(.*)\"$ ]]; then
+        val="${BASH_REMATCH[1]}"
+      fi
+      [[ -n "$val" ]] || die "env-file '$file': $key has empty value"
+      eval "$arrayname+=(\"\$key=\$val\")"
+    else
+      die "env-file '$file' line not parseable: $line"
+    fi
+  done < "$file"
+}
+
 cmd_run() {
   # p2ai run [-e VAR=entry[::attr]] [...] -- <command> [args...]
   #
@@ -857,20 +902,26 @@ cmd_run() {
   local saw_dashdash=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -e|--env)  env_pairs+=("${2:?}"); shift 2 ;;
-      --)        shift; cmd=("$@"); saw_dashdash=1; break ;;
+      -e|--env)       env_pairs+=("${2:?}"); shift 2 ;;
+      -f|--env-file)  _p2ai_load_env_file "${2:?}" env_pairs; shift 2 ;;
+      --)             shift; cmd=("$@"); saw_dashdash=1; break ;;
       -h|--help)
         cat <<USAGE
-p2ai run [-e VAR=entry[::attr]] [...] -- <command> [args...]
+p2ai run [-e VAR=entry[::attr]] [-f FILE] [...] -- <command> [args...]
   Fetch secret(s) and run <command> with them in its environment only.
   The parent shell never sees the secrets — no env-leak window.
 
-  -e, --env VAR=entry           map env-var VAR to entry's Password
-  -e, --env VAR=entry::Notes    map to a specific attribute
+  -e, --env VAR=entry            map env-var VAR to entry's Password
+  -e, --env VAR=entry::Notes     map to a specific attribute
+  -f, --env-file FILE            load mappings from a dotenv file:
+                                   # comment
+                                   GH_TOKEN='Group/GitHub Token'
+                                   DB_PASS="Prod/Postgres"
+                                   AWS_KEY=Aws/Prod::UserName
 
 Examples:
   p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
-  p2ai run -e DB_PASS='Postgres Prod' -- ./deploy.sh
+  p2ai run -f .p2ai.env -- ./deploy.sh
   p2ai run -e API='Stripe'::Notes -- node scripts/import.js
 
 Note: arguments after -- are passed to the target command unchanged.
