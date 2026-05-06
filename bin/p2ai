@@ -204,36 +204,35 @@ cmd_setup() {
   # 1. Master password enrollment (Swift CLI, TTY required)
   "$P2AI_MASTER_BIN" setup || return $?
 
-  # 2. KeePass DB path — pick via file dialog if not yet configured
+  # 2. KeePass DB — auto-create if not yet present
   mkdir -p "$P2AI_STATE_DIR"
   chmod 700 "$P2AI_STATE_DIR"
   local existing="$P2AI_DB"
   if [[ -r "$existing" ]]; then
     printf 'p2ai: using existing DB: %s\n' "$existing" >&2
   else
-    printf 'p2ai: KeePass DB not found at %s\n' "$existing" >&2
-    printf 'p2ai: opening file picker — choose your .kdbx ...\n' >&2
-    local chosen; chosen=$(pick_db_dialog)
-    if [[ -z "$chosen" ]]; then
-      printf 'p2ai: cancelled. Set $P2AI_DB manually or run `p2ai setup` again.\n' >&2
-      return 1
-    fi
-    if [[ ! -r "$chosen" ]]; then
-      printf 'p2ai: chosen file not readable: %s\n' "$chosen" >&2
-      return 1
-    fi
-    printf '%s' "$chosen" > "$P2AI_DB_PATH_FILE"
+    local kpcli; kpcli=$(resolve_kpcli)
+    printf 'p2ai: no DB found — creating new database at %s\n' "$existing" >&2
+    # Fetch master from keychain (just enrolled above) to create DB with same password
+    local master; master=$("$P2AI_MASTER_BIN" --reason "Create KeePass database") || {
+      printf 'p2ai: Touch-ID cancelled — cannot create DB.\n' >&2; return 1
+    }
+    printf '%s\n%s\n' "$master" "$master" | "$kpcli" db-create -p "$existing" >/dev/null 2>&1 || {
+      master=""
+      printf 'p2ai: failed to create DB at %s\n' "$existing" >&2; return 1
+    }
+    master=""
+    printf '%s' "$existing" > "$P2AI_DB_PATH_FILE"
     chmod 600 "$P2AI_DB_PATH_FILE"
-    printf 'p2ai: saved DB path → %s\n' "$chosen" >&2
-    existing="$chosen"
+    printf 'p2ai: database created and saved → %s\n' "$existing" >&2
   fi
 
   # 3. Quick smoke test: list root with master to verify both work
   printf 'p2ai: verifying master + DB ... (Touch-ID prompt)\n' >&2
-  if p2ai_lang_test=$(P2AI_DB="$existing" "$0" list >/dev/null 2>&1); then
+  if P2AI_DB="$existing" "$0" list >/dev/null 2>&1; then
     printf 'p2ai: setup complete. Try `p2ai unlock` then `p2ai fetch <entry>`.\n' >&2
   else
-    printf 'p2ai: master enrolled + DB path saved, but verification list failed. Check `p2ai list` manually.\n' >&2
+    printf 'p2ai: master enrolled + DB created, but verification failed. Run `p2ai list` to debug.\n' >&2
   fi
 }
 
