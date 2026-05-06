@@ -84,15 +84,12 @@ p2ai setup
 
 ### Modes
 
-p2ai has three operating modes — pick by trade-off, not by feature flag.
+| | Default | `p2ai unlock` | `p2ai unlock --mode per-entry` |
+|---|---|---|---|
+| **Touch-ID** | every fetch | once for 5 min | once per new secret |
+| **Master cached** | no | yes | no |
 
-| Mode | Command | Touch-ID | Master in RAM | Per-entry cache | Use when |
-|---|---|---|---|---|---|
-| **Strict** | _(no unlock)_ | every fetch | never | none | one-off fetches, max paranoia |
-| **Per-Entry** | `p2ai unlock --mode per-entry` | once per **new** secret | never | yes (5 min idle) | balanced — master never cached, repeated fetches stay fast |
-| **Session** | `p2ai unlock` | once per session | yes (5 min idle, 30 min hard cap) | yes | fast workflows — many fetches in a row |
-
-All modes auto-lock on screen-lock, screensaver start, idle TTL, hard cap, or `p2ai lock`.
+Auto-locks on screen-lock or `p2ai lock`.
 
 ## Daily use
 
