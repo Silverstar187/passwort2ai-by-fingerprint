@@ -4,6 +4,77 @@ All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/) — major bumps on breaking CLI changes.
 
+## [0.5.0] — 2026-05-06
+
+### BREAKING
+
+- **`--export VAR` removed** from `fetch`, `otp`, `gtoken`, `attachment`. The
+  flag printed `export VAR='value'` to stdout — when the caller's stdout was
+  captured by an AI-agent's Bash tool (Claude Code, Cursor, etc.), the secret
+  string entered the conversation transcript. Even with `eval` consumption,
+  any accidental pipe (`| head`, `2>&1 | tee`, command substitution misuse)
+  re-exposed the value. Removing it eliminates the foot-gun entirely.
+
+### Migration from 0.4.x
+
+```bash
+# Before:
+eval "$(p2ai fetch 'GH Token' --export GH_TOKEN)" && gh repo list && unset GH_TOKEN
+
+# After:
+p2ai run -e GH_TOKEN='GH Token' -- gh repo list
+```
+
+`p2ai run` forks a subshell, exports the var only inside it, and `exec`s the
+target command. The parent shell never holds the secret. Multi-secret and
+attribute-specific (`entry::UserName`) variants:
+
+```bash
+p2ai run \
+  -e AWS_ACCESS_KEY_ID='AWS Prod' \
+  -e AWS_SECRET_ACCESS_KEY='AWS Prod Secret' \
+  -- aws s3 ls
+p2ai run -e USER='Service'::UserName -e PW='Service'::Password -- some-tool
+```
+
+For multi-step shell sessions: wrap commands in `bash -c "..."` after `--`,
+or write a small shell script and run it via `p2ai run -- bash script.sh`.
+
+### Added
+
+- **`p2ai run [-e VAR='entry'[::attr]] [...] -- <command>`** — primary egress
+  for tool invocations. Forks a subshell, exports requested secrets there
+  only, `exec`s the command. The parent shell's environment never holds the
+  values, eliminating the env-leak window between `eval` and `unset` (which
+  could be widened by SIGINT, `set -x` traces, or crash dumps).
+- 7 new security tests in section 17 verifying the run-isolation contract:
+  parent env stays clean, child receives env, multi-secret + ::attr support,
+  exit code propagation, secret not in child argv (env-only), no-args case,
+  malformed input rejection.
+
+### Changed
+
+- `fetch` no longer accepts `--export`, `--print`, or `-o FILE`. Default
+  `pbcopy` is the only egress; `p2ai run` is the recommended path for tools
+  that need an env-var.
+- `otp` no longer accepts `--export` or `--print` — pbcopy only.
+- `attachment` no longer accepts `--export` or `--print` — `-o FILE` (binary
+  blobs) and `--pbcopy` (text) are the only paths.
+- `gtoken` no longer accepts `--export` or `--print` — pbcopy only.
+- `cmd_run` exit codes propagate from the child via standard subshell
+  semantics, including SIGINT (130).
+- Section 14 of the security suite (peer-UID check) is now an honest SKIP
+  with a code-pointer, replacing the weak `strings | grep` test that was
+  prone to false positives.
+
+### Documentation
+
+- `SKILL.md` rewritten: `p2ai run` is the primary pattern in the decision
+  matrix, with explicit "use `p2ai run` for every tool invocation that needs
+  a secret in env" guidance for AI agents.
+- README: install pin bumped to v0.5.0; daily-use section leads with `p2ai
+  run` examples.
+
 ## [0.4.0] — 2026-05-06
 
 ### BREAKING

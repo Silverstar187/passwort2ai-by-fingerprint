@@ -120,7 +120,7 @@ section "6. Cache invalidation on mutation"
 
 start_agent session
 "$P2AI" add "InvTest" -u alice >/dev/null 2>&1
-"$P2AI" fetch "InvTest" --attr UserName --export _DUMMY >/dev/null 2>&1
+"$P2AI" fetch "InvTest" --attr UserName >/dev/null 2>&1
 status_before=$(ag "STATUS" | grep -oE 'entries=[0-9]+')
 
 "$P2AI" rm "InvTest" -f >/dev/null 2>&1
@@ -229,27 +229,28 @@ out=$("$P2AI" fetch "PrintGuard" -o /tmp/p2ai-leak-test 2>&1)
 echo "$out" | grep -q "removed" && pass "fetch -o FILE refused (no-disk policy)" || fail "fetch -o FILE not blocked"
 rm -f /tmp/p2ai-leak-test  # safety: should not exist anyway
 
-# --export should still work
-eval "$("$P2AI" fetch "PrintGuard" --attr UserName --export _U 2>/dev/null)"
-[[ "$_U" == "who" ]] && pass "--export VAR still works" || fail "--export broken"
-unset _U
+# --export is now removed — should die
+out=$("$P2AI" fetch "PrintGuard" --attr UserName --export _U 2>&1)
+echo "$out" | grep -q "removed" && pass "fetch --export refused" || fail "fetch --export not blocked"
+
+# p2ai run is the env-injection path
+got=$("$P2AI" run -e _U='PrintGuard'::UserName -- bash -c 'printf "%s" "$_U"' 2>/dev/null)
+[[ "$got" == "who" ]] && pass "p2ai run injects env into child" || fail "p2ai run failed (got: $got)"
 
 "$P2AI" rm "PrintGuard" -f >/dev/null 2>&1
 
-section "14. Socket peer-UID check (code review)"
+section "14. Socket peer-UID check"
 
-# Can't easily test cross-UID in single-user CI, but verify the syscall is in the binary
-if strings "$AGENT_BIN" 2>/dev/null | grep -q "getpeereid"; then
-  pass "getpeereid() symbol present in agent binary"
-else
-  skip "getpeereid not detectable in stripped binary (verify by source)"
-fi
+# Real cross-UID testing needs a second user account, which we don't have in
+# unattended CI. The symbol-presence check is too weak (false positives if
+# the linker keeps unused refs), so we just acknowledge the gap honestly.
+skip "cross-UID rejection requires a second user account — verify via src/p2ai-agent.swift (look for getpeereid() and the uid != getuid() reject branch)"
 
 section "15. Lock clears all cached secrets"
 
 start_agent session
 "$P2AI" add "ClearTest" -u alice >/dev/null 2>&1
-"$P2AI" fetch "ClearTest" --attr UserName --export _DUMMY >/dev/null 2>&1
+"$P2AI" fetch "ClearTest" --attr UserName >/dev/null 2>&1
 sleep 0.2
 status=$(ag "STATUS" | grep -oE 'entries=[0-9]+')
 [[ "$status" == "entries=1" ]] || fail "setup failed: $status"
@@ -262,6 +263,68 @@ sleep 0.2
 start_agent session
 status=$(ag "STATUS" | grep -oE 'entries=[0-9]+')
 [[ "$status" == "entries=0" ]] && pass "fresh agent starts with empty cache" || fail "cache leaked across restart: $status"
+
+section "17. p2ai run isolation"
+
+# This section verifies the core security claim of `p2ai run`: secrets enter
+# only the child command's environment, never the parent shell, never argv.
+"$P2AI" add "RunGuard" -u runuser -g 24 >/dev/null 2>&1
+
+# 17a. Parent shell env stays clean after `p2ai run` returns
+unset SECRET || true
+"$P2AI" run -e SECRET='RunGuard' -- bash -c 'true'
+[[ -z "${SECRET:-}" ]] \
+  && pass "parent shell env has no SECRET after run completes" \
+  || fail "parent leaked SECRET (length ${#SECRET})"
+
+# 17b. Child sees the env
+got=$("$P2AI" run -e SECRET='RunGuard' -- bash -c 'printf len=%d "${#SECRET}"')
+[[ "$got" == "len=24" ]] \
+  && pass "child receives injected env (len=24)" \
+  || fail "child env wrong: $got"
+
+# 17c. Multiple secrets, ::attr support
+got=$("$P2AI" run -e A='RunGuard' -e B='RunGuard'::UserName -- bash -c 'printf "Alen=%d B=%s" "${#A}" "$B"')
+[[ "$got" == "Alen=24 B=runuser" ]] \
+  && pass "multi-secret + ::attr injection works" \
+  || fail "multi-env wrong: $got"
+
+# 17d. Exit code propagation
+"$P2AI" run -e _X='RunGuard' -- bash -c 'exit 17'
+[[ $? -eq 17 ]] \
+  && pass "child exit code propagated to parent" \
+  || fail "exit code lost"
+
+# 17e. Secret not in child argv. Spawn a long-running child and inspect ps.
+"$P2AI" run -e _ARGV='RunGuard' -- sleep 3 &
+RUN_BGPID=$!
+sleep 0.4
+# Grab argv of the deepest descendant (the actual sleep process)
+SLEEP_PID=$(pgrep -P "$(pgrep -P "$RUN_BGPID" | head -1)" 2>/dev/null | head -1 || pgrep -P "$RUN_BGPID" | head -1)
+[[ -z "$SLEEP_PID" ]] && SLEEP_PID="$RUN_BGPID"
+sleep_argv=$(ps -p "$SLEEP_PID" -o args= 2>/dev/null)
+# Get the actual secret value once for comparison (not via run, directly)
+ref_pw=$(printf '%s\n' "$TESTMASTER" | keepassxc-cli show -s -a Password "$TESTDB" "RunGuard" 2>/dev/null)
+if [[ -n "$ref_pw" ]] && printf '%s' "$sleep_argv" | grep -qF "$ref_pw"; then
+  fail "secret leaked into child argv: $sleep_argv"
+else
+  pass "secret not in child argv (env-only injection)"
+fi
+wait "$RUN_BGPID" 2>/dev/null || true
+
+# 17f. Empty --env list still works (just exec)
+got=$("$P2AI" run -- echo OK)
+[[ "$got" == "OK" ]] \
+  && pass "p2ai run with no -e args just execs" \
+  || fail "no-env case broken: $got"
+
+# 17g. Invalid --env format dies
+out=$("$P2AI" run -e BADFORMAT -- echo x 2>&1)
+echo "$out" | grep -q "invalid --env" \
+  && pass "malformed --env rejected" \
+  || fail "malformed --env not caught: $out"
+
+"$P2AI" rm "RunGuard" -f >/dev/null 2>&1
 
 section "16. PUTENTRY size cap"
 

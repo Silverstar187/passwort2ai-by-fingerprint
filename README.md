@@ -46,24 +46,29 @@ That's it. `p2ai setup` enrolls your master into the macOS Keychain and picks yo
 <summary>Install from source instead</summary>
 
 ```bash
-git clone --branch v0.4.0 --depth 1 https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
+git clone --branch v0.5.0 --depth 1 https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
 ~/.passwort2ai/install.sh
 p2ai setup
 ```
 
-`--branch v0.4.0` pins to a reviewable commit SHA. `install.sh` compiles the Swift binaries and links `p2ai` into `~/.local/bin`.
+`--branch v0.5.0` pins to a reviewable commit SHA. `install.sh` compiles the Swift binaries and links `p2ai` into `~/.local/bin`.
 </details>
 
 ## Daily use
 
-Two egress paths only — both ephemeral, neither hits stdout or disk:
-**`pbcopy` (default)** for human-driven paste, **`--export VAR` + `eval`** for tools that read from env.
+Two egress paths only — neither lets the secret reach the parent shell or disk:
+**`p2ai run`** for tool invocations (env-injection only into the child), **`p2ai fetch`** for clipboard hand-off (default pbcopy + auto-clear).
 
 ```bash
-# Read
+# Run a tool with secrets injected (PRIMARY pattern)
+p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
+p2ai run -e DB='Postgres Prod' -- psql
+p2ai run -e A='AWS Key' -e B='AWS Secret' -- aws s3 ls
+p2ai run -e USR='Service'::UserName -- some-tool   # specific attribute via ::
+
+# Fetch to clipboard (for human paste)
 p2ai fetch "<entry>"                              # → clipboard, auto-clear 30s
 p2ai fetch "<entry>" --attr UserName              # any attribute (default: Password)
-eval "$(p2ai fetch '<entry>' --export TOKEN)"     # → $TOKEN env-var
 p2ai list [query]                                 # metadata-only search
 p2ai otp "<entry>"                                # current TOTP code
 p2ai attachment "<entry>" file.json -o out.json   # binary attachment → file
@@ -80,7 +85,7 @@ p2ai unlock --mode per-entry                      # master never cached
 p2ai status / p2ai lock
 ```
 
-> `--print` (stdout dump) and `-o FILE` for `fetch` are intentionally absent. Stdout dumps land in AI-agent transcripts; disk writes leave artefacts. The wrapper refuses both. Upgrading from 0.3.x? See [CHANGELOG.md](CHANGELOG.md#040--2026-05-06).
+> `--print`, `-o FILE` for fetch, and `--export` are intentionally absent. Each was a transcript-leak path. The wrapper refuses them with a pointer to `p2ai run`. Upgrading from 0.4.x? Replace `eval "$(p2ai fetch X --export V)" && tool` with `p2ai run -e V='X' -- tool`. Full migration in [CHANGELOG.md](CHANGELOG.md#050--2026-05-06).
 
 ## Requirements
 

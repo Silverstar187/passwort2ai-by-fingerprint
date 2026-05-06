@@ -10,9 +10,9 @@
 #
 # Usage:
 #   p2ai setup                              one-time enroll master
+#   p2ai run -e VAR='<entry>' -- <cmd>      env-injection (recommended for tool calls)
 #   p2ai fetch <entry>                      Touch-ID, password → pbcopy + auto-clear 30s
 #   p2ai fetch <entry> --attr UserName      different attribute (default: Password)
-#   p2ai fetch <entry> --export VAR         → 'export VAR=...' for use with eval
 #   p2ai add <entry> [-u USER] [-g [LEN]]   add new entry; -g auto-generates pw (default 24c)
 #   p2ai add <entry> -p                     add entry with interactive password prompt
 #   p2ai add <entry> --url URL --notes TXT  add with URL + notes fields
@@ -28,8 +28,10 @@
 #   p2ai config                             show config + db path
 #   p2ai -h                                 help
 #
-# IMPORTANT: --print is removed from fetch/otp/gtoken/attachment to prevent
-# transcript leaks in AI-agent shells. Use pbcopy (default) or --export VAR.
+# IMPORTANT: --print, -o FILE, and --export are removed from fetch/otp/gtoken/
+# attachment to prevent transcript leaks in AI-agent shells. The two safe
+# egress paths are: (1) pbcopy with auto-clear (default), (2) `p2ai run` for
+# env-injection — secret enters only the target command's environment.
 #
 # Config:
 #   $P2AI_DB                                .kdbx path (default ~/Passwörter.kdbx)
@@ -160,6 +162,7 @@ fetch_master() {
   fi
   "$P2AI_MASTER_BIN" --reason "$reason"
 }
+
 
 pick_db_dialog() {
   # macOS native file picker via AppleScript. Returns POSIX path or empty.
@@ -303,13 +306,13 @@ cmd_list() {
 }
 
 cmd_gtoken() {
-  local entry="" scope="https://www.googleapis.com/auth/cloud-platform" mode="pbcopy" var=""
+  local entry="" scope="https://www.googleapis.com/auth/cloud-platform" mode="pbcopy"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scope|-s)   scope="$2"; shift 2 ;;
-      --print|-p)   die "--print removed (transcript-leak risk). Use --export VAR + eval, or --pbcopy (default)." ;;
+      --print|-p)   die "--print removed. Use 'p2ai run -e VAR=\"sa-entry\" -- <cmd>' or default pbcopy." ;;
+      --export|-e)  die "--export removed (transcript-leak risk). Use 'p2ai gtoken' default pbcopy, or write a tiny wrapper that fetches and execs the cmd in one shot." ;;
       --pbcopy|-c)  mode="pbcopy"; shift ;;
-      --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
       -h|--help)
         cat <<USAGE
 p2ai gtoken <sa-entry> [options]
@@ -318,14 +321,13 @@ p2ai gtoken <sa-entry> [options]
   --scope, -s SCOPE   default: cloud-platform. Aliases: drive, drive.readonly,
                       gmail, sheets, calendar, etc. Full URL also accepted.
   --pbcopy, -c        token to clipboard, auto-clear after \$P2AI_CLEAR_SECONDS (default)
-  --export, -e VAR    emit 'export VAR=...' for use with eval
 USAGE
         return 0 ;;
       -*) die "unknown gtoken flag: $1" ;;
       *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai gtoken <sa-entry> [--scope X] [--pbcopy | --export VAR]"
+  [[ -n "$entry" ]] || die "usage: p2ai gtoken <sa-entry> [--scope X] [--pbcopy]"
 
   # Resolve scope shortcuts to full URL
   case "$scope" in
@@ -387,36 +389,28 @@ PY
   token="${token//$'\n'/}"
   [[ -n "$token" ]] || die "empty token returned"
 
-  # 4. Output: pbcopy or export — never stdout-print
-  case "$mode" in
-    pbcopy)
-      printf '%s' "$token" | pbcopy
-      printf 'p2ai: gtoken (%s) in clipboard, auto-clear in %ss.\n' "$scope" "$P2AI_CLEAR_SECONDS" >&2
-      ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$token" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
-      disown
-      ;;
-    export)
-      printf "export %s='%s'\n" "$var" "$token"
-      ;;
-  esac
+  # 4. Output: pbcopy only — no stdout, no env exposure
+  printf '%s' "$token" | pbcopy
+  printf 'p2ai: gtoken (%s) in clipboard, auto-clear in %ss.\n' "$scope" "$P2AI_CLEAR_SECONDS" >&2
+  ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$token" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
+  disown
   token=""
 }
 
 cmd_attachment() {
-  local entry="" name="" outfile="" mode="" var=""
+  local entry="" name="" outfile="" mode=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -o|--output)  outfile="${2:?}"; mode="file"; shift 2 ;;
-      --print|-p)   die "--print removed (transcript-leak risk). Use --export VAR for text, or -o FILE for binary blobs." ;;
-      --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
+      --print|-p)   die "--print removed. Use -o FILE (any) or --pbcopy (text only)." ;;
+      --export|-e)  die "--export removed (transcript-leak risk). Use -o FILE for files or --pbcopy for text." ;;
       --pbcopy|-c)  mode="pbcopy"; shift ;;
       -h|--help)
         cat <<USAGE
 p2ai attachment <entry> [<attachment-name>] [options]
-  no name              → list attachment names (metadata only, safe to print)
-  <name> -o FILE       → export to file (only legit path for binary blobs)
-  <name> --pbcopy      → copy text content to clipboard (default, text only, auto-clear)
-  <name> --export VAR  → emit 'export VAR=...' for use with eval
+  no name              → list attachment names (metadata only)
+  <name> -o FILE       → export to file (binary or text)
+  <name> --pbcopy      → copy text content to clipboard (default for text, auto-clear)
 USAGE
         return 0 ;;
       -*) die "unknown attachment flag: $1" ;;
@@ -426,7 +420,7 @@ USAGE
           shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai attachment <entry> [<name>] [-o FILE | --export VAR | --pbcopy]"
+  [[ -n "$entry" ]] || die "usage: p2ai attachment <entry> [<name>] [-o FILE | --pbcopy]"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
   local master; master=$(fetch_master "$(p2ai_reason attachment "$entry")") || die "auth failed"
@@ -455,23 +449,15 @@ USAGE
   master=""
   [[ -n "$content" ]] || die "attachment '$name' empty"
 
-  # Refuse binary content for non-file modes
+  # Refuse binary content for clipboard
   if printf '%s' "${content:0:8192}" | LC_ALL=C grep -q $'\0'; then
-    die "attachment '$name' is binary — use -o FILE to save (clipboard/env-var modes are text-only)"
+    die "attachment '$name' is binary — use -o FILE to save (clipboard is text-only)"
   fi
 
-  case "$mode" in
-    pbcopy)
-      printf '%s' "$content" | pbcopy
-      printf 'p2ai: attachment %s/%s in clipboard, auto-clear in %ss.\n' "$entry" "$name" "$P2AI_CLEAR_SECONDS" >&2
-      ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$content" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
-      disown
-      ;;
-    export)
-      local esc; esc=$(printf '%s' "$content" | sed "s/'/'\\\\''/g")
-      printf "export %s='%s'\n" "$var" "$esc"
-      ;;
-  esac
+  printf '%s' "$content" | pbcopy
+  printf 'p2ai: attachment %s/%s in clipboard, auto-clear in %ss.\n' "$entry" "$name" "$P2AI_CLEAR_SECONDS" >&2
+  ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$content" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
+  disown
 }
 
 cmd_add() {
@@ -670,24 +656,23 @@ USAGE
 }
 
 cmd_otp() {
-  local entry="" mode="pbcopy" var=""
+  local entry=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --print|-p)  die "--print is removed (would leak into AI transcripts). Use --export VAR + eval." ;;
-      --export|-e) mode="export"; var="${2:?}"; shift 2 ;;
+      --print|-p)  die "--print removed (transcript-leak risk). Default pbcopy is the only output mode." ;;
+      --export|-e) die "--export removed (transcript-leak risk). TOTP codes are short-lived, default pbcopy is sufficient." ;;
       -h|--help)
         cat <<USAGE
-p2ai otp <entry> [--export VAR]
+p2ai otp <entry>
   Fetch current TOTP code for an entry.
-  Default: pbcopy + auto-clear after \$P2AI_CLEAR_SECONDS.
-  --export, -e VAR    emit 'export VAR=...' for use with eval
+  Output: pbcopy with auto-clear after \$P2AI_CLEAR_SECONDS.
 USAGE
         return 0 ;;
       -*) die "unknown otp flag: $1" ;;
       *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai otp <entry> [--export VAR]"
+  [[ -n "$entry" ]] || die "usage: p2ai otp <entry>"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
 
@@ -696,73 +681,165 @@ USAGE
   code=$(printf '%s\n' "$master" | "$kpcli" show -s -t "$P2AI_DB" "$entry" 2>/dev/null) || die "no TOTP for entry: $entry"
   master=""
   [[ -n "$code" ]] || die "TOTP empty (entry has no OTP configured)"
-  # keepassxc-cli prints TOTP as last line; trim
   code=$(printf '%s' "$code" | tail -1)
 
-  case "$mode" in
-    print) printf '%s\n' "$code" ;;
-    pbcopy)
-      printf '%s' "$code" | pbcopy
-      printf 'p2ai: TOTP for %s in clipboard, auto-clear in %ss.\n' "$entry" "$P2AI_CLEAR_SECONDS" >&2
-      ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$code" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
-      disown
-      ;;
-  esac
+  printf '%s' "$code" | pbcopy
+  printf 'p2ai: TOTP for %s in clipboard, auto-clear in %ss.\n' "$entry" "$P2AI_CLEAR_SECONDS" >&2
+  ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$code" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
+  disown
+}
+
+cmd_run() {
+  # p2ai run [-e VAR=entry[::attr]] [...] -- <command> [args...]
+  #
+  # Fetch one or more secrets, fork a subshell, export them in the subshell
+  # only, and execve the target command. The parent shell never holds the
+  # secrets in its environment, eliminating the env-leak window that the
+  # eval+export+unset pattern leaves open between the eval and the unset.
+  #
+  # Format: VAR=entry           → fetch Password attribute of entry
+  #         VAR=entry::Username → fetch a specific attribute
+  local -a env_pairs=()
+  local -a cmd=()
+  local saw_dashdash=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -e|--env)  env_pairs+=("${2:?}"); shift 2 ;;
+      --)        shift; cmd=("$@"); saw_dashdash=1; break ;;
+      -h|--help)
+        cat <<USAGE
+p2ai run [-e VAR=entry[::attr]] [...] -- <command> [args...]
+  Fetch secret(s) and run <command> with them in its environment only.
+  The parent shell never sees the secrets — no env-leak window.
+
+  -e, --env VAR=entry           map env-var VAR to entry's Password
+  -e, --env VAR=entry::Notes    map to a specific attribute
+
+Examples:
+  p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
+  p2ai run -e DB_PASS='Postgres Prod' -- ./deploy.sh
+  p2ai run -e API='Stripe'::Notes -- node scripts/import.js
+
+Note: arguments after -- are passed to the target command unchanged.
+Shell builtins (cd, alias) won't work after -- — wrap with bash -c "...".
+USAGE
+        return 0 ;;
+      -*) die "unknown run flag: $1 (try: p2ai run -h)" ;;
+      *)  die "unexpected positional '$1' — separate command with --" ;;
+    esac
+  done
+  [[ $saw_dashdash -eq 1 && ${#cmd[@]} -gt 0 ]] || die "usage: p2ai run [-e VAR=entry] -- <command> [args...]"
+
+  if [[ ${#env_pairs[@]} -eq 0 ]]; then
+    # No secrets requested — just exec the command, no fork
+    exec "${cmd[@]}"
+  fi
+
+  require_db
+  local kpcli; kpcli=$(resolve_kpcli)
+  local master; master=$(fetch_master "$(p2ai_reason fetch run)") || die "auth failed"
+
+  # Fetch every requested secret. Cache via agent if running.
+  local -a env_kv=()
+  local pair var rest entry attr secret cached
+  for pair in "${env_pairs[@]}"; do
+    [[ "$pair" == *=* ]] || die "invalid --env: $pair (expected VAR=entry[::attr])"
+    var="${pair%%=*}"
+    rest="${pair#*=}"
+    [[ -n "$var" && -n "$rest" ]] || die "invalid --env: $pair"
+    if [[ "$rest" == *::* ]]; then
+      attr="${rest##*::}"
+      entry="${rest%::*}"
+    else
+      attr="Password"
+      entry="$rest"
+    fi
+
+    secret=""
+    if agent_running; then
+      cached=$(agent_send "GETENTRY ${entry}:${attr}")
+      [[ -n "$cached" && "$cached" != "MISS" ]] && secret="$cached"
+    fi
+    if [[ -z "$secret" ]]; then
+      secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) \
+        || die "entry not found: $entry"
+      [[ -n "$secret" ]] || die "empty value for $entry / $attr"
+      if agent_running; then
+        printf '%s' "$secret" | agent_send_with_body "PUTENTRY ${entry}:${attr}" >/dev/null 2>&1 || true
+      fi
+    fi
+    env_kv+=("$var=$secret")
+    secret=""
+  done
+  master=""
+
+  # Subshell fork: export secrets there, exec command. Parent shell's env
+  # is untouched — neither `ps e` on the parent nor a SIGINT-without-unset
+  # leaves the values exposed.
+  (
+    for kv in "${env_kv[@]}"; do
+      export "${kv?}"
+    done
+    exec "${cmd[@]}"
+  )
 }
 
 cmd_fetch() {
-  local entry="" attr="Password" mode="pbcopy" var=""
+  local entry="" attr="Password" mode="pbcopy"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --print|-p)
-        die "--print removed (transcript-leak risk). Use --export VAR + eval — value stays in subprocess RAM, never on disk, never in stdout."
+        die "--print removed (transcript-leak risk). Use 'p2ai run -e VAR=\"entry\" -- <cmd>'."
         ;;
       --out|-o)
-        die "-o FILE removed for fetch (no-disk policy). Use --export VAR; if a tool needs a file path, write the var to a tmpfile yourself in the same shell line."
+        die "-o FILE removed for fetch (no-disk policy). Use 'p2ai run -e VAR=\"entry\" -- <cmd>'."
+        ;;
+      --export|-e)
+        die "--export removed (transcript-leak risk in AI-agent shells). Use 'p2ai run -e VAR=\"entry\" -- <cmd>' — the secret enters only the cmd's environment, never the parent shell."
         ;;
       --attr|-a)    attr="${2:?}"; shift 2 ;;
-      --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
-      --no-clear|-n) mode="${mode}-noclear"; shift ;;
+      --no-clear|-n) mode="pbcopy-noclear"; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai fetch <entry> [--attr X] [--no-clear]
+  Fetch a KeePass attribute, deliver via clipboard with auto-clear.
+  --attr, -a NAME    attribute to fetch (default: Password)
+  --no-clear, -n     skip auto-clear
+
+  For tool injection use: p2ai run -e VAR="entry" -- <cmd>
+USAGE
+        return 0 ;;
       -*)           die "unknown flag: $1" ;;
       *)            [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai fetch <entry> [--attr X] [--export VAR]"
+  [[ -n "$entry" ]] || die "usage: p2ai fetch <entry> [--attr X] [--no-clear]
+  Default: pbcopy with auto-clear after \$P2AI_CLEAR_SECONDS.
+  For tool injection use 'p2ai run -e VAR=\"entry\" -- <cmd>'."
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
 
   local cache_key="${entry}:${attr}"
   local secret=""
 
-  # 1. Agent entry-cache hit → no Touch-ID, no kpcli
   if agent_running; then
     local cached; cached=$(agent_send "GETENTRY $cache_key")
     if [[ -n "$cached" && "$cached" != "MISS" ]]; then
       secret="$cached"
     fi
   fi
-
   if [[ -z "$secret" ]]; then
-    # 2. Cache miss → master (agent or Touch-ID) + kpcli
     local reason; reason=$(p2ai_reason fetch "$entry")
     local master; master=$(fetch_master "$reason") || die "auth failed"
-
-    # No `tail -1` — chops multiline attrs (Notes, custom fields).
     secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) || die "entry not found: $entry"
     master=""
     [[ -n "$secret" ]] || die "empty value for $entry / $attr"
-
-    # 3. Push into agent cache for next time (best-effort, no failure if agent down)
     if agent_running; then
       printf '%s' "$secret" | agent_send_with_body "PUTENTRY $cache_key" >/dev/null 2>&1 || true
     fi
   fi
 
   case "$mode" in
-    export|export-noclear)
-      local esc; esc=$(printf '%s' "$secret" | sed "s/'/'\\\\''/g")
-      printf "export %s='%s'\n" "$var" "$esc"
-      ;;
     pbcopy)
       printf '%s' "$secret" | pbcopy
       printf 'p2ai: %s/%s in clipboard, auto-clear in %ss.\n' "$entry" "$attr" "$P2AI_CLEAR_SECONDS" >&2
@@ -785,6 +862,7 @@ main() {
   local cmd="${1:-}"; [[ $# -gt 0 ]] && shift || true
   case "$cmd" in
     setup)                  cmd_setup "$@" ;;
+    run|exec)               cmd_run "$@" ;;
     fetch|f|get)            cmd_fetch "$@" ;;
     add|new)                cmd_add "$@" ;;
     rm|remove|del|delete)   cmd_rm "$@" ;;
