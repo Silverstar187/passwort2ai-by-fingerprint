@@ -153,6 +153,36 @@ This avoids the clipboard auto-clear race and the lost-shell-var trap simultaneo
 
 For OAuth tokens: `p2ai gtoken` mints a fresh token per call — no clipboard, no cache. Same pattern.
 
+## `--print` is LEAK-prone in AI-agent shells
+
+`--print` writes the secret to stdout. In Claude-Code (and most AI agent Bash tools), the captured stdout of a Bash call is **returned into the conversation transcript**. Standalone `p2ai fetch 'X' --print` therefore leaks.
+
+**Safe** — `--print` inside command substitution. The subshell stdout never reaches the Bash-tool's captured output:
+```bash
+PW=$(p2ai fetch 'X' --print)
+tool --pw "$PW"
+unset PW
+```
+
+**Unsafe** — these all leak:
+```bash
+p2ai fetch 'X' --print                     # raw stdout → chat
+p2ai fetch 'X' --print | head              # head re-emits to stdout → chat
+echo "$PW"                                 # echo'd value → chat
+printf 'token=%s' "$PW"                    # same
+p2ai fetch 'X' --print | tee /tmp/out      # tee duplicates to stdout → chat
+```
+
+**Preferred for AI agents — `--export VAR` + `eval`:**
+```bash
+eval "$(p2ai fetch 'X' --export TOKEN)"
+tool --token "$TOKEN"
+unset TOKEN
+```
+`--export` outputs an `export VAR='value'` line. `eval` consumes it; the secret enters the environment of the running Bash call, not its stdout.
+
+**Preferred for clipboard-driven UX (humans):** the default `p2ai fetch 'X'` (no flags) → pbcopy with auto-clear after 30s.
+
 ## DEBUGGING RULE (critical — avoid the leak path)
 
 When `p2ai` fails or returns unexpected data, **DO NOT** debug by running raw `keepassxc-cli show` (or any tool that emits secrets) without redirecting stdout. Anything that lands on stdout in a Bash-tool call enters the conversation transcript.
