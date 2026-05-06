@@ -47,12 +47,12 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 <tr><td>signed releases, MIT, open source</td></tr>
 </table>
 
-**Main advantage: Speed +++ Security ++**
+**Main advantage: Speed $\color{#22C55E}{+++}$ Security $\color{#22C55E}{++}$**
 
-|  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
+|  | Paste into chat | `pbpaste` to AI | $\color{#22C55E}{\textbf{p2ai run}}$ |
 |---|---|---|---|
-| ⌨️ **Keystrokes** | `Cmd+Tab`, click value, `Cmd+C`, `Cmd+Tab`, click chat input, `Cmd+V` (4 keys + 2 clicks) | `Cmd+C` plus typing "use the token in my clipboard for X" (~50) | **1 Touch-ID tap** |
-| 👀 **Who sees it** | you, the LLM, vendor servers, log pipelines, possibly training data | you, the LLM, your clipboard history, every device on your iCloud account | **only the target tool** |
+| ⌨️ **Keystrokes** | `Cmd+Tab`, click value, `Cmd+C`, `Cmd+Tab`, click chat input, `Cmd+V` (4 keys + 2 clicks) | `Cmd+C` plus typing "use the token in my clipboard for X" (~50) | $\color{#22C55E}{\textbf{1 Touch-ID tap}}$ |
+| 👀 **Who sees it** | you, the LLM, vendor servers, log pipelines, possibly training data | you, your clipboard history, every device on your iCloud account | $\color{#22C55E}{\textbf{only the target tool}}$ |
 
 ## Install
 
