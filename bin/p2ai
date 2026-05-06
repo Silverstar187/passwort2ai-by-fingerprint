@@ -773,15 +773,25 @@ USAGE
   done
   master=""
 
-  # Subshell fork: export secrets there, exec command. Parent shell's env
-  # is untouched — neither `ps e` on the parent nor a SIGINT-without-unset
-  # leaves the values exposed.
-  (
-    for kv in "${env_kv[@]}"; do
-      export "${kv?}"
-    done
-    exec "${cmd[@]}"
-  )
+  # Use bash's one-shot env assignment + exec. The `VAR=val cmd` syntax
+  # scopes the assignment to cmd's environment only (not the parent shell),
+  # AND `exec` replaces our bash process with cmd — same PID.
+  #
+  # Why same-PID matters: signals (SIGINT, SIGTERM) sent to p2ai go straight
+  # to cmd. No orphan processes when the user Ctrl+C's a long-running tool.
+  # Why argv-safe: the assignments are bash-internal one-shot syntax, never
+  # appear in /proc/PID/cmdline or `ps -p PID -o args`.
+  local assignments=""
+  local kv
+  for kv in "${env_kv[@]}"; do
+    assignments+=" $(printf '%q' "$kv")"
+  done
+  local cmd_str=""
+  local c
+  for c in "${cmd[@]}"; do
+    cmd_str+=" $(printf '%q' "$c")"
+  done
+  eval "$assignments exec $cmd_str"
 }
 
 cmd_fetch() {

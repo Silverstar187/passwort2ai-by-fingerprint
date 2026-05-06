@@ -324,6 +324,22 @@ echo "$out" | grep -q "invalid --env" \
   && pass "malformed --env rejected" \
   || fail "malformed --env not caught: $out"
 
+# 17h. Signal-forwarding — Ctrl+C / SIGTERM to p2ai must reach the child
+"$P2AI" run -e _=RunGuard -- sleep 30 &
+RUN_PID=$!
+sleep 0.4
+# After exec, RUN_PID IS the cmd (sleep). Verify by checking comm.
+comm=$(ps -p "$RUN_PID" -o comm= 2>/dev/null | tr -d ' ')
+[[ "$comm" == "sleep" ]] \
+  && pass "exec replaces p2ai bash with target cmd (same PID, comm=$comm)" \
+  || fail "PID is not the cmd (comm=$comm) — exec failed?"
+kill -TERM "$RUN_PID" 2>/dev/null
+sleep 0.4
+kill -0 "$RUN_PID" 2>/dev/null \
+  && fail "child survived SIGTERM — orphan risk" \
+  || pass "SIGTERM to p2ai run reaches child cleanly"
+wait "$RUN_PID" 2>/dev/null || true
+
 "$P2AI" rm "RunGuard" -f >/dev/null 2>&1
 
 section "16. PUTENTRY size cap"
