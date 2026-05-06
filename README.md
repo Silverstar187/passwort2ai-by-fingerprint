@@ -8,9 +8,9 @@
 
 You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) wants one. Every existing workflow leaks:
 
-- **`.env` files everywhere.** Scattered, sometimes committed, rotation is a manual hunt.
-- **Paste in chat.** LLM sees plaintext. Lands in transcripts, logs, vendor servers, possibly training data.
-- **"It's in your clipboard."** Lives in clipboard history and Universal Clipboard to your iPhone.
+- **`.env` files.** Annoying, scattered everywhere, one of them accidentally got committed to another repo and you're not sure which.
+- **Copy-paste into chat.** Exhausting. Plus the value is now in the chat history, prompt logs, vendor servers, possibly training data.
+- **"It's in your clipboard."** Annoying. You have to type that prompt every single time, the AI has to remember to read it, and the value still lives in clipboard history and Universal Clipboard to your iPhone.
 - **Hardcoded "just for testing".** Stays in git blame forever.
 
 > **p2ai removes all four.** One vault (your KeePass `.kdbx`), one finger tap, the value goes straight into the child process's environment. The LLM never sees plaintext. Disk doesn't either.
