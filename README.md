@@ -42,6 +42,12 @@ p2ai setup
 
 That's it. `p2ai setup` enrolls your master into the macOS Keychain and picks your `.kdbx` via a native file dialog.
 
+For **AI agents** (Claude Code, Cursor, Aider, Cline) drop the rules file:
+
+```bash
+p2ai system-prompt > .cursorrules        # or >> CLAUDE.md / .aider.conf.yml
+```
+
 <details>
 <summary>Install from source instead</summary>
 

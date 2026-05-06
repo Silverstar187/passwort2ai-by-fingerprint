@@ -33,6 +33,13 @@
 # egress paths are: (1) pbcopy with auto-clear (default), (2) `p2ai run` for
 # env-injection — secret enters only the target command's environment.
 #
+# Exit codes (stable contract for AI-agent retry logic):
+#   0   success
+#   1   generic error / usage
+#   2   tool dependency missing (e.g. keepassxc-cli not in PATH)
+#   3   entry not found / DB read error
+#   130 SIGINT — user cancelled Touch-ID prompt
+#
 # Config:
 #   $P2AI_DB                                .kdbx path (default ~/Passwörter.kdbx)
 #   $P2AI_KEEPASSXC_CLI                     keepassxc-cli binary (default: auto-detect)
@@ -295,14 +302,160 @@ cmd_config() {
 cmd_list() {
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
-  local query="${1:-}"
+  local query="" json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json=1; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai list [query] [--json]
+  List entry paths (names only, never values).
+  --json, -j    emit JSON array: [{"path":"Group/Title","group":"Group","title":"Title"}]
+USAGE
+        return 0 ;;
+      -*) die "unknown list flag: $1" ;;
+      *)  [[ -z "$query" ]] && query="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
   local master; master=$(fetch_master "$(p2ai_reason list)") || die "auth failed"
+  local lines
   if [[ -n "$query" ]]; then
-    printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null | grep -i -- "$query" || true
+    lines=$(printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null | grep -i -- "$query" || true)
   else
-    printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null
+    lines=$(printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null)
   fi
   master=""
+
+  if [[ "$json" -eq 1 ]]; then
+    # Emit JSON. Trim group-header lines (end in /) — those are metadata, not entries.
+    printf '%s\n' "$lines" | python3 -c '
+import json, sys
+out = []
+group = ""
+for line in sys.stdin.read().splitlines():
+    s = line.rstrip()
+    if not s: continue
+    if s.endswith("/"):
+        group = s.rstrip("/")
+        continue
+    title = s.lstrip()
+    indent = len(s) - len(title)
+    path = (group + "/" + title) if (group and indent > 0) else title
+    out.append({"path": path, "group": group if indent > 0 else "", "title": title})
+print(json.dumps(out, ensure_ascii=False))
+'
+  else
+    printf '%s\n' "$lines"
+  fi
+}
+
+cmd_system_prompt() {
+  # Emit AI-agent rules markdown. Pipe into .cursorrules / CLAUDE.md / etc.
+  local target="generic"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target|-t)  target="${2:?}"; shift 2 ;;
+      -h|--help)
+        cat <<USAGE
+p2ai system-prompt [--target generic|claude|cursor|aider|cline]
+  Emit secrets-management rules markdown for AI coding agents.
+  Pipe into the agent's rules file (.cursorrules, CLAUDE.md, .aider.conf.yml, etc.).
+
+  Examples:
+    p2ai system-prompt > .cursorrules
+    p2ai system-prompt --target claude >> CLAUDE.md
+USAGE
+        return 0 ;;
+      -*) die "unknown system-prompt flag: $1" ;;
+      *)  die "extra arg: $1" ;;
+    esac
+  done
+
+  case "$target" in
+    generic|claude|cursor|aider|cline) ;;
+    *) die "--target must be: generic, claude, cursor, aider, or cline" ;;
+  esac
+
+  cat <<'PROMPT'
+# Secrets management (passwort2ai)
+
+This project uses `p2ai` (passwort2ai-by-fingerprint) — a Touch-ID-gated
+KeePass-CLI wrapper that keeps secrets out of the chat transcript.
+
+## Hard rules
+
+- **NEVER** paste a secret into the chat. Not full, not truncated, not masked.
+- **NEVER** use `eval "$(p2ai fetch ... --export VAR)"`. That pattern is removed.
+- **NEVER** use `--print`, `-o FILE` (for fetch), or `--export` flags.
+- **NEVER** echo a fetched secret to stdout in any form.
+
+## Required pattern — `p2ai run`
+
+For every tool invocation that needs a secret in env, use `p2ai run`:
+
+```bash
+p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
+p2ai run -e DB='Postgres Prod' -- psql
+p2ai run -e A='AWS Key' -e B='AWS Secret' -- aws s3 ls
+p2ai run -e USR='Service'::UserName -- some-tool   # specific attribute
+```
+
+`p2ai run` forks, exports the var only inside the child's environment,
+and execve's the target. The parent shell never holds the secret.
+Same PID, signals propagate, exit codes propagate.
+
+## Discovery
+
+If the entry name is uncertain:
+
+```bash
+p2ai list <fuzzy-query>             # human-readable
+p2ai list --json                    # parseable for tooling
+```
+
+## Clipboard hand-off (human paste only)
+
+```bash
+p2ai fetch "<entry>"                # → clipboard, auto-clear 30s
+p2ai otp "<entry>"                  # current TOTP code → clipboard
+```
+
+## Storing new secrets
+
+If the user provides a fresh secret (verbally or via clipboard):
+
+```bash
+p2ai add "<entry>" -u USER -p       # user types pw in their terminal
+p2ai add "<entry>" -u USER -g       # auto-generate 24-char pw
+```
+
+## Session caching
+
+To avoid Touch-ID for every call in a multi-step task:
+
+```bash
+p2ai unlock                         # one Touch-ID, 5min idle, 30min hard cap
+# now p2ai run / fetch / list don't re-prompt
+p2ai lock                           # clear cache when done
+```
+
+## Exit codes (parse for retry logic)
+
+- 0   success
+- 1   generic error
+- 2   tool dependency missing (keepassxc-cli not in PATH)
+- 3   entry not found / DB read error
+- 130 SIGINT (user cancelled Touch-ID prompt)
+
+## Debugging without leaks
+
+Never run raw `keepassxc-cli show` — it dumps secrets to stdout.
+Use a `p2ai run` boolean check instead:
+
+```bash
+p2ai run -e V='Entry'::Notes -- bash -c 'grep -q "marker" <<<"$V" && echo OK || echo MISSING'
+```
+PROMPT
 }
 
 cmd_gtoken() {
@@ -882,6 +1035,7 @@ main() {
     attachment|attach|att)  cmd_attachment "$@" ;;
     gtoken|gcp-token)       cmd_gtoken "$@" ;;
     list|ls|search)         cmd_list "$@" ;;
+    system-prompt|prompt|rules) cmd_system_prompt "$@" ;;
     unlock|u)         cmd_unlock "$@" ;;
     lock|l)           cmd_lock "$@" ;;
     status|s)         cmd_status "$@" ;;
