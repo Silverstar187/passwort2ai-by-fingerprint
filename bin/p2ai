@@ -252,6 +252,99 @@ cmd_list() {
   master=""
 }
 
+cmd_gtoken() {
+  local entry="" scope="https://www.googleapis.com/auth/cloud-platform" mode="print" var=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scope|-s)   scope="$2"; shift 2 ;;
+      --print|-p)   mode="print"; shift ;;
+      --pbcopy|-c)  mode="pbcopy"; shift ;;
+      --export|-e)  mode="export"; var="${2:?}"; shift 2 ;;
+      -h|--help)
+        cat <<USAGE
+p2ai gtoken <sa-entry> [options]
+  Mint a Google OAuth access token from a Service-Account JSON entry.
+  SA JSON must be in the entry's Notes field (a {...} block).
+  --scope, -s SCOPE   default: cloud-platform. Aliases: drive, drive.readonly,
+                      gmail, sheets, calendar, etc. Full URL also accepted.
+  --print, -p         token to stdout (default)
+  --pbcopy, -c        token to clipboard, auto-clear after \$P2AI_CLEAR_SECONDS
+  --export, -e VAR    emit 'export VAR=...' for use with eval
+USAGE
+        return 0 ;;
+      -*) die "unknown gtoken flag: $1" ;;
+      *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
+    esac
+  done
+  [[ -n "$entry" ]] || die "usage: p2ai gtoken <sa-entry> [--scope X] [--print|--pbcopy|--export VAR]"
+
+  # Resolve scope shortcuts to full URL
+  case "$scope" in
+    https://*) ;;
+    drive)               scope="https://www.googleapis.com/auth/drive" ;;
+    drive.readonly)      scope="https://www.googleapis.com/auth/drive.readonly" ;;
+    gmail)               scope="https://www.googleapis.com/auth/gmail.readonly" ;;
+    sheets)              scope="https://www.googleapis.com/auth/spreadsheets" ;;
+    calendar)            scope="https://www.googleapis.com/auth/calendar" ;;
+    cloud-platform|cloud) scope="https://www.googleapis.com/auth/cloud-platform" ;;
+    *) scope="https://www.googleapis.com/auth/$scope" ;;
+  esac
+
+  command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not found (https://cloud.google.com/sdk/docs/install)"
+
+  local tmpdir; tmpdir=$(mktemp -d -t p2ai-gtoken)
+  trap "rm -rf -P '$tmpdir' 2>/dev/null" EXIT
+
+  # 1. Fetch SA Notes → file (no chat-leak via stdout-redirect)
+  local raw="$tmpdir/raw" json="$tmpdir/sa.json" tok="$tmpdir/tok"
+  if ! "$0" fetch "$entry" --attr Notes --print > "$raw" 2>/dev/null; then
+    die "could not fetch '$entry' Notes attr"
+  fi
+
+  # 2. Extract first {...} JSON block
+  python3 - <<PY > "$json" 2>/dev/null
+import re, json, sys
+raw=open("$raw").read()
+m=re.search(r'\{[\s\S]*\}', raw)
+if not m: sys.exit(1)
+try:
+    obj=json.loads(m.group(0))
+    if 'private_key' not in obj or 'client_email' not in obj: sys.exit(2)
+    json.dump(obj, sys.stdout)
+except Exception:
+    sys.exit(3)
+PY
+  [[ -s "$json" ]] || die "could not extract SA JSON from '$entry' Notes (need {...} with private_key + client_email)"
+  chmod 600 "$json"
+
+  # 3. Activate SA + print access token
+  CLOUDSDK_PYTHON_SUPPRESS_WARNINGS=1 gcloud auth activate-service-account --key-file="$json" --quiet >/dev/null 2>&1 \
+    || die "gcloud auth activate-service-account failed"
+  CLOUDSDK_PYTHON_SUPPRESS_WARNINGS=1 gcloud auth print-access-token --scopes="$scope" > "$tok" 2>/dev/null \
+    || die "gcloud print-access-token failed (scope: $scope)"
+  [[ -s "$tok" ]] || die "empty token returned"
+
+  local token; token=$(<"$tok")
+  token="${token//$'\n'/}"
+
+  # 4. Output
+  case "$mode" in
+    print)
+      printf '%s\n' "$token"
+      ;;
+    pbcopy)
+      printf '%s' "$token" | pbcopy
+      printf 'p2ai: gtoken (%s) in clipboard, auto-clear in %ss.\n' "$scope" "$P2AI_CLEAR_SECONDS" >&2
+      ( sleep "$P2AI_CLEAR_SECONDS"; if [[ "$(pbpaste)" == "$token" ]]; then printf '' | pbcopy; fi ) >/dev/null 2>&1 &
+      disown
+      ;;
+    export)
+      printf "export %s='%s'\n" "$var" "$token"
+      ;;
+  esac
+  token=""
+}
+
 cmd_attachment() {
   local entry="" name="" outfile="" mode="auto"
   while [[ $# -gt 0 ]]; do
@@ -442,6 +535,7 @@ main() {
     fetch|f|get)            cmd_fetch "$@" ;;
     add|new)                cmd_add "$@" ;;
     attachment|attach|att)  cmd_attachment "$@" ;;
+    gtoken|gcp-token)       cmd_gtoken "$@" ;;
     list|ls)                cmd_list "$@" ;;
     unlock|u)         cmd_unlock "$@" ;;
     lock|l)           cmd_lock "$@" ;;

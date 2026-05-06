@@ -49,6 +49,16 @@ p2ai add "<entry>" -u USER -g 32                  # custom length
 p2ai add "<entry>" -u USER -p                     # user types pw in terminal (not chat)
 p2ai add "<entry>" --url URL --notes TEXT         # URL + notes fields
 
+# Attachments
+p2ai attachment "<entry>"                          # list attachment names
+p2ai attachment "<entry>" "name.json" -o file.json # export to file
+p2ai attachment "<entry>" "name.txt" --print       # text → stdout
+
+# Google OAuth access token from Service-Account JSON in entry Notes field
+p2ai gtoken "<sa-entry>" --scope drive.readonly    # mint access token, print to stdout
+p2ai gtoken "<sa-entry>" --scope drive --pbcopy    # → clipboard auto-clear
+TOKEN=$(p2ai gtoken "<sa-entry>" -s sheets) && curl -H "Authorization: Bearer $TOKEN" ...; unset TOKEN
+
 # Session caching (sudo-style — Touch-ID once, fetch many)
 p2ai unlock [--ttl 300]    # default 5min idle, 30min hard cap
 p2ai status                # show remaining TTL
@@ -93,6 +103,35 @@ p2ai setup                 # master enrollment + .kdbx file picker
 > 2. If the secret doesn't exist yet and the user provides it (verbally, dictated, or via clipboard), store it with `p2ai add` so future agents can fetch it.
 > 3. **NEVER write a secret value into the chat.** Not the full value, not a truncated value, not in code, not in errors, not in summaries.
 > 4. If the user copied something to clipboard for you to use, prefer `pbpaste | <consumer>` or `eval "$(pbpaste-style-export VAR)"` and consume it without ever round-tripping through the conversation.
+
+## Single-call rule (critical for AI agents)
+
+In the Claude-Code Bash tool (and most AI agent shells), **each `Bash(...)` invocation is a fresh shell**. Shell variables, `cd`, `export`, and the current working directory are NOT preserved across calls.
+
+**Wrong** (split across two Bash calls):
+```bash
+# Call 1
+TOKEN=$(p2ai fetch 'X' --print); printf '' | pbcopy
+# Call 2 — $TOKEN is undefined here, clipboard already cleared
+curl -H "Authorization: Bearer $TOKEN" ...
+```
+
+**Right** (single Bash call, no clipboard intermediary):
+```bash
+TOKEN=$(p2ai fetch 'X' --print)
+curl -H "Authorization: Bearer $TOKEN" ...
+curl -H "Authorization: Bearer $TOKEN" ...   # multiple calls reuse $TOKEN
+unset TOKEN
+```
+
+For Google service-account tokens specifically, use `p2ai gtoken` so the OAuth token is minted fresh on each call without ever touching the clipboard:
+```bash
+TOKEN=$(p2ai gtoken 'Google SA Entry' --scope drive.readonly)
+curl -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?..."
+unset TOKEN
+```
+
+If the secret must cross calls (genuinely needed), prefer **clipboard with no auto-clear** for human-driven hand-off and **always re-fetch via `p2ai`** for agent-driven flows. Never assume a shell-var from a previous call still exists.
 
 ## DEBUGGING RULE (critical — avoid the leak path)
 
