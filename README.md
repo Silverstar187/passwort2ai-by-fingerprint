@@ -4,7 +4,7 @@
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
 </p>
 
-## All your secrets handed to the LLM, leak-proof, with one fingerprint. 🫆
+## All your passwords in one place. Securely stored, invisible to AI, covered by your fingerprint. 🫆
 
 You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) wants one.
 
@@ -25,11 +25,6 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 | `p2ai fetch 'entry'` | One Touch-ID tap. Clipboard with auto-clear after 30s. |
 
 $\color{green}{\textbf{Main advantage: Speed +++}} \quad \color{orange}{\textbf{Security ++}}$
-
-```bash
-p2ai run -e GH_TOKEN='GitHub Token' -- gh repo list
-# 👆 Touch-ID. Token lives only inside gh's env. No chat leak, no disk leak.
-```
 
 |  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
 |---|---|---|---|
