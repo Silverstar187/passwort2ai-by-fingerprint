@@ -87,7 +87,8 @@ p2ai setup
 | | Default | `p2ai unlock` | `p2ai unlock --mode per-entry` |
 |---|---|---|---|
 | **Touch-ID** | every fetch | once for 5 min | once per new secret |
-| **Master cached** | no | yes | no |
+| **Master cached** | — | yes | — |
+| **Fetches cached** | — | yes | yes |
 
 Auto-locks on screen-lock or `p2ai lock`.
 
