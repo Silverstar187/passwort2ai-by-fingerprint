@@ -47,8 +47,7 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 <tr><td>signed releases, MIT, open source</td></tr>
 </table>
 
-> [!TIP]
-> **Main advantage: Speed `+++` Security `++`**
+> **Main advantages:** Speed `+++` Security `++`
 
 |  | Paste into chat | `pbpaste` to AI | **`p2ai run`** |
 |---|---|---|---|
