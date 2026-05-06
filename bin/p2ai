@@ -255,10 +255,91 @@ cmd_setup() {
   # 3. Quick smoke test: list root with master to verify both work
   printf 'p2ai: verifying master + DB ... (Touch-ID prompt)\n' >&2
   if P2AI_DB="$existing" "$0" list >/dev/null 2>&1; then
-    printf 'p2ai: setup complete. Try `p2ai unlock` then `p2ai fetch <entry>`.\n' >&2
+    printf 'p2ai: setup complete.\n' >&2
   else
     printf 'p2ai: master enrolled + DB created, but verification failed. Run `p2ai list` to debug.\n' >&2
   fi
+
+  # 4. Optional: PATH + Claude Code skill checks (idempotent, with [Y/n] prompts)
+  setup_check_path
+  setup_check_skill
+
+  printf '\n  Try: p2ai unlock && p2ai add "My First Entry"\n\n' >&2
+}
+
+# Resolve absolute path of this script (handles symlinks).
+self_realpath() {
+  local s="$0"
+  while [[ -L "$s" ]]; do
+    local t; t="$(readlink "$s")"
+    if [[ "$t" = /* ]]; then s="$t"
+    else s="$(cd "$(dirname "$s")" && cd "$(dirname "$t")" && pwd)/$(basename "$t")"
+    fi
+  done
+  printf '%s' "$s"
+}
+
+setup_check_path() {
+  local self; self="$(self_realpath)"
+  local self_dir; self_dir="$(dirname "$self")"
+
+  # If `p2ai` resolves on PATH and points to our script (or its symlink), all good.
+  local resolved
+  if resolved="$(command -v p2ai 2>/dev/null)" && [[ -n "$resolved" ]]; then
+    printf '\n  ✓ PATH: p2ai is on $PATH (%s)\n' "$resolved" >&2
+    return 0
+  fi
+
+  printf '\n  ⚠ PATH: p2ai not on $PATH. To run `p2ai ...` from any terminal,\n' >&2
+  printf '         add %s to your shell rc.\n' "$self_dir" >&2
+
+  local SHELL_RC=""
+  if [[ -n "${ZSH_VERSION:-}" || "${SHELL:-}" == *zsh* ]] && [[ -f "$HOME/.zshrc" ]]; then
+    SHELL_RC="$HOME/.zshrc"
+  elif [[ -f "$HOME/.zshrc" ]]; then SHELL_RC="$HOME/.zshrc"
+  elif [[ -f "$HOME/.bashrc" ]]; then SHELL_RC="$HOME/.bashrc"
+  elif [[ -f "$HOME/.bash_profile" ]]; then SHELL_RC="$HOME/.bash_profile"
+  fi
+
+  if [[ -z "$SHELL_RC" ]]; then
+    printf '         No shell rc found. Add manually: export PATH="%s:$PATH"\n' "$self_dir" >&2
+    return 1
+  fi
+
+  printf '\n  Add it to %s now? [Y/n] ' "$SHELL_RC" >&2
+  local ans; read -r ans </dev/tty || ans=""
+  case "${ans:-y}" in
+    [Yy]*)
+      local line="export PATH=\"$self_dir:\$PATH\""
+      if grep -Fxq "$line" "$SHELL_RC" 2>/dev/null; then
+        printf '  ✓ PATH export already in %s (open a new terminal to pick it up)\n' "$SHELL_RC" >&2
+      else
+        printf '\n# Added by p2ai setup\n%s\n' "$line" >> "$SHELL_RC"
+        printf '  ✓ Added to %s. Open a new terminal or run: source %s\n' "$SHELL_RC" "$SHELL_RC" >&2
+      fi
+      ;;
+    *) printf '  Skipped. Manual: export PATH="%s:$PATH"\n' "$self_dir" >&2 ;;
+  esac
+}
+
+setup_check_skill() {
+  if [[ ! -d "$HOME/.claude" ]]; then
+    return 0  # Claude Code not installed, nothing to do
+  fi
+
+  local skill_md="$HOME/.claude/skills/passwort2ai/SKILL.md"
+  if [[ -e "$skill_md" ]]; then
+    printf '\n  ✓ Claude Code skill: linked (%s)\n' "$skill_md" >&2
+    return 0
+  fi
+
+  printf '\n  ⚠ Claude Code skill: not linked\n' >&2
+  printf '  Link it now so Claude can use p2ai? [Y/n] ' >&2
+  local ans; read -r ans </dev/tty || ans=""
+  case "${ans:-y}" in
+    [Yy]*) cmd_install_skill ;;
+    *) printf '  Skipped. Manual: p2ai install-skill\n' >&2 ;;
+  esac
 }
 
 cmd_unlock() {
