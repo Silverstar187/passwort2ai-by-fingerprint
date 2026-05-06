@@ -1,0 +1,148 @@
+#!/usr/bin/env swift
+//
+// p2a-master — Touch-ID-gated KeePass master password.
+// Stores master in macOS Keychain, gates retrieval via LAContext biometrics.
+//
+//   p2a-master setup           Prompt + store master in keychain
+//   p2a-master                 Touch-ID, print master to stdout
+//   p2a-master --pbcopy        Touch-ID, copy master to clipboard
+//   p2a-master remove          Delete keychain item
+//
+// Plain keychain item (no biometry-ACL — unsigned CLIs lack entitlements on macOS).
+// Touch-ID gating via LAContext.evaluatePolicy works in unsigned CLIs.
+
+import Foundation
+import Security
+import LocalAuthentication
+
+let SERVICE = "passwort2ai-master"
+let ACCOUNT = NSUserName()
+
+func die(_ msg: String, _ code: Int32 = 1) -> Never {
+    FileHandle.standardError.write((msg + "\n").data(using: .utf8)!)
+    exit(code)
+}
+
+func requireAuth(reason: String) {
+    let ctx = LAContext()
+    var err: NSError?
+    var policy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
+    if !ctx.canEvaluatePolicy(policy, error: &err) {
+        FileHandle.standardError.write("Biometry unavailable (\(err?.localizedDescription ?? "?")) — falling back to password\n".data(using: .utf8)!)
+        policy = .deviceOwnerAuthentication
+        var err2: NSError?
+        guard ctx.canEvaluatePolicy(policy, error: &err2) else {
+            die("No auth available: \(err2?.localizedDescription ?? "?")")
+        }
+    }
+    let sema = DispatchSemaphore(value: 0)
+    var ok = false
+    var evalErr: Error?
+    ctx.evaluatePolicy(policy, localizedReason: reason) { success, e in
+        ok = success; evalErr = e; sema.signal()
+    }
+    sema.wait()
+    guard ok else { die("Auth failed: \(evalErr?.localizedDescription ?? "cancelled")", 130) }
+}
+
+func storeMaster() {
+    guard isatty(fileno(stdin)) != 0 else {
+        die("No TTY — run in real terminal (Terminal.app / iTerm).")
+    }
+    guard let cstr = getpass("KeePass master password (hidden): ") else { die("getpass null") }
+    let pw = String(cString: cstr)
+    guard !pw.isEmpty else { die("Empty input — aborted") }
+    guard let cstr2 = getpass("Repeat: ") else { die("getpass null") }
+    let pw2 = String(cString: cstr2)
+    guard pw == pw2 else { die("Mismatch — aborted") }
+
+    let del: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: SERVICE,
+        kSecAttrAccount as String: ACCOUNT,
+    ]
+    SecItemDelete(del as CFDictionary)
+
+    let add: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: SERVICE,
+        kSecAttrAccount as String: ACCOUNT,
+        kSecValueData as String: pw.data(using: .utf8)!,
+        kSecAttrLabel as String: "Passwort2AI master (Touch-ID gated)",
+        kSecAttrDescription as String: "KeePass master password",
+    ]
+    let status = SecItemAdd(add as CFDictionary, nil)
+    guard status == errSecSuccess else {
+        die("SecItemAdd failed: \(status) (\(SecCopyErrorMessageString(status, nil) as String? ?? "?"))")
+    }
+    print("Stored.")
+}
+
+func removeMaster() {
+    let q: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: SERVICE,
+        kSecAttrAccount as String: ACCOUNT,
+    ]
+    let status = SecItemDelete(q as CFDictionary)
+    if status == errSecSuccess { print("Removed.") }
+    else if status == errSecItemNotFound { print("Nothing to remove.") }
+    else { die("SecItemDelete failed: \(status)") }
+}
+
+func pbcopy(_ s: String) {
+    let p = Process()
+    p.launchPath = "/usr/bin/pbcopy"
+    let pipe = Pipe()
+    p.standardInput = pipe
+    do { try p.run() } catch { die("pbcopy launch failed: \(error)") }
+    pipe.fileHandleForWriting.write(s.data(using: .utf8)!)
+    try? pipe.fileHandleForWriting.close()
+    p.waitUntilExit()
+}
+
+func fetchMaster(toClipboard: Bool) {
+    let probe: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: SERVICE,
+        kSecAttrAccount as String: ACCOUNT,
+        kSecReturnData as String: false,
+    ]
+    var probeRes: AnyObject?
+    let probeStatus = SecItemCopyMatching(probe as CFDictionary, &probeRes)
+    if probeStatus == errSecItemNotFound { die("Not stored. Run `p2a-master setup`.") }
+
+    requireAuth(reason: "unlock KeePass master")
+
+    let q: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: SERVICE,
+        kSecAttrAccount as String: ACCOUNT,
+        kSecReturnData as String: true,
+    ]
+    var item: AnyObject?
+    let status = SecItemCopyMatching(q as CFDictionary, &item)
+    guard status == errSecSuccess, let data = item as? Data, let pw = String(data: data, encoding: .utf8) else {
+        die("Fetch failed: \(status) (\(SecCopyErrorMessageString(status, nil) as String? ?? "?"))")
+    }
+    if toClipboard { pbcopy(pw); FileHandle.standardError.write("Master in clipboard.\n".data(using: .utf8)!) }
+    else { print(pw) }
+}
+
+let args = CommandLine.arguments.dropFirst()
+switch args.first {
+case "setup": storeMaster()
+case "remove", "rm": removeMaster()
+case "--pbcopy", "-c": fetchMaster(toClipboard: true)
+case nil: fetchMaster(toClipboard: false)
+case "-h", "--help":
+    print("""
+    p2a-master — Touch-ID-gated KeePass master password.
+      p2a-master            Touch-ID, master to stdout
+      p2a-master --pbcopy   Touch-ID, master to clipboard
+      p2a-master setup      one-time enrollment
+      p2a-master remove     delete keychain item
+    """)
+default:
+    die("Unknown arg: \(args.first ?? "") — try -h")
+}
