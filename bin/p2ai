@@ -41,7 +41,7 @@
 #   130 SIGINT — user cancelled Touch-ID prompt
 #
 # Config:
-#   $P2AI_DB                                .kdbx path (default ~/Passwörter.kdbx)
+#   $P2AI_DB                                .kdbx path (default ~/passwords.kdbx)
 #   $P2AI_KEEPASSXC_CLI                     keepassxc-cli binary (default: auto-detect)
 #   $P2AI_CLEAR_SECONDS                     pbcopy auto-clear delay (default 30)
 #   $P2AI_AGENT_TTL                         agent idle TTL seconds (default 300)
@@ -63,7 +63,7 @@ P2AI_DB_PATH_FILE="$P2AI_STATE_DIR/db.path"
 if [[ -z "${P2AI_DB:-}" && -r "$P2AI_DB_PATH_FILE" ]]; then
   P2AI_DB=$(<"$P2AI_DB_PATH_FILE")
 fi
-P2AI_DB="${P2AI_DB:-$HOME/Passwörter.kdbx}"
+P2AI_DB="${P2AI_DB:-$HOME/passwords.kdbx}"
 
 die() { printf 'p2ai: %s\n' "$*" >&2; exit 1; }
 
@@ -225,6 +225,7 @@ cmd_setup() {
     printf '%s' "$chosen" > "$P2AI_DB_PATH_FILE"
     chmod 600 "$P2AI_DB_PATH_FILE"
     printf 'p2ai: saved DB path → %s\n' "$chosen" >&2
+    existing="$chosen"
   fi
 
   # 3. Quick smoke test: list root with master to verify both work
