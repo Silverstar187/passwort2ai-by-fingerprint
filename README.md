@@ -6,7 +6,7 @@
 
 ## Why
 
-AI agents need passwords. Pasting them in chat leaks them everywhere.
+AI coding agents (Claude Code, Cursor, Copilot, Aider, Cline) need passwords. Pasting them in chat leaks them everywhere.
 
 > **Agent needs PW → allow by Touch-ID → done.**
 
@@ -101,7 +101,7 @@ Two modes:
 
 p2ai sits **between your KeePass DB and the AI tools you use day-to-day**. It eliminates one specific anti-pattern: pasting secrets in chat. It does not replace KeePass, FDE, or your hardware token — those layers still apply if you need them.
 
-Trust model: same as `ssh-agent` / `sudo` cache. The agent holds secrets in process RAM with idle TTL, hard cap, and auto-lock on screen-lock. A compromised host can read agent RAM. For tighter isolation use `--mode per-entry` (master is never cached) or `p2ai lock` after each session.
+Trust model: same as `ssh-agent` / `sudo` cache. The agent holds secrets in process RAM with idle TTL, hard cap, and auto-lock on screen-lock. A compromised host or another same-user process can read agent RAM, the clipboard, or env-vars (via `ps e` / memory dump) — same constraint as every credential helper. For tighter isolation use `--mode per-entry` (master is never cached) or `p2ai lock` after each session.
 
 ## License
 
