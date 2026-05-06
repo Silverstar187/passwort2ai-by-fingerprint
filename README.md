@@ -4,7 +4,7 @@
   <img src="docs/touchid-dialog.png" alt="Touch-ID dialog: Passwort2AI is trying to Fetch &quot;Google Cloud API Token&quot;" width="380">
 </p>
 
-## All your secrets handed to the LLM, leak-proof, with one fingerprint.
+## All your secrets handed to the LLM, leak-proof, with one fingerprint. 🫆
 
 You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cline, Copilot) wants one. Every existing workflow leaks:
 
