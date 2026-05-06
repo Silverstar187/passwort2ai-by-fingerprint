@@ -91,12 +91,21 @@ func storeMaster() {
     guard isatty(fileno(stdin)) != 0 else {
         die("No TTY — run in real terminal (Terminal.app / iTerm).")
     }
-    guard let cstr = getpass("KeePass master password (hidden): ") else { die("getpass null") }
+    FileHandle.standardError.write("""
+
+    ┌─ Step 1 of 2: Master Password ────────────────────────────────┐
+    │  Choose a strong password for your password database.         │
+    │  This is the ONE password you need to remember.               │
+    └───────────────────────────────────────────────────────────────┘
+
+    """.data(using: .utf8)!)
+
+    guard let cstr = getpass("  Master password (hidden): ") else { die("getpass null") }
     let pw = String(cString: cstr)
     guard !pw.isEmpty else { die("Empty input — aborted") }
-    guard let cstr2 = getpass("Repeat: ") else { die("getpass null") }
+    guard let cstr2 = getpass("  Repeat:                   ") else { die("getpass null") }
     let pw2 = String(cString: cstr2)
-    guard pw == pw2 else { die("Mismatch — aborted") }
+    guard pw == pw2 else { die("Passwords don't match — aborted") }
 
     let del: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
@@ -104,6 +113,16 @@ func storeMaster() {
         kSecAttrAccount as String: ACCOUNT,
     ]
     SecItemDelete(del as CFDictionary)
+
+    FileHandle.standardError.write("""
+
+    ┌─ Step 2 of 2: Keychain Permission ────────────────────────────┐
+    │  macOS will now ask for permission to save your password.     │
+    │                                                               │
+    │  → Click "Always Allow" so Touch ID works without re-asking. │
+    └───────────────────────────────────────────────────────────────┘
+
+    """.data(using: .utf8)!)
 
     // -A: allow access from any app without warning. Modern macOS does not
     // reliably honor -T <path> for unsigned Swift scripts (signature-based
@@ -130,7 +149,7 @@ func storeMaster() {
     guard task.terminationStatus == 0 else {
         die("security add-generic-password failed (\(task.terminationStatus)): \(stderrOut)")
     }
-    print("Stored.")
+    FileHandle.standardError.write("  ✓ Stored in Keychain.\n\n".data(using: .utf8)!)
 }
 
 func removeMaster() {

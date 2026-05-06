@@ -201,6 +201,19 @@ OSA
 }
 
 cmd_setup() {
+  printf '\n'
+  printf '  p2ai — Passwort2AI by Fingerprint\n'
+  printf '  ══════════════════════════════════════════════════════════════\n'
+  printf '  One-time setup. Takes about 30 seconds.\n'
+  printf '\n'
+  printf '  What happens:\n'
+  printf '    1. You pick a master password (stored in Keychain)\n'
+  printf '    2. macOS asks for Keychain permission → click "Always Allow"\n'
+  printf '    3. Your password database is created automatically\n'
+  printf '    4. Touch ID confirmed — you'\''re done\n'
+  printf '  ══════════════════════════════════════════════════════════════\n'
+  printf '\n'
+
   # 1. Master password enrollment (Swift CLI, TTY required)
   "$P2AI_MASTER_BIN" setup || return $?
 
