@@ -252,12 +252,11 @@ cmd_setup() {
     printf 'p2ai: database created and saved → %s\n' "$existing" >&2
   fi
 
-  # 3. Quick smoke test: list root with master to verify both work
-  printf 'p2ai: verifying master + DB ... (Touch-ID prompt)\n' >&2
-  if P2AI_DB="$existing" "$0" list >/dev/null 2>&1; then
+  # 3. Verify DB is readable — no second Touch-ID, just a file check
+  if [[ -s "$existing" ]]; then
     printf 'p2ai: setup complete.\n' >&2
   else
-    printf 'p2ai: master enrolled + DB created, but verification failed. Run `p2ai list` to debug.\n' >&2
+    printf 'p2ai: DB missing or empty after creation — run `p2ai list` to debug.\n' >&2
   fi
 
   # 4. Optional: PATH + Claude Code skill checks (idempotent, with [Y/n] prompts)
