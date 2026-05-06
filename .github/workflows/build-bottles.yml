@@ -1,0 +1,156 @@
+name: Build Bottles
+
+# Runs after "Bump Homebrew formula" succeeds on a tag push,
+# OR manually via workflow_dispatch.
+# Builds pre-compiled bottles for arm64 + x86_64, attaches them to the
+# GitHub release, then updates the tap formula with the bottle block so
+# `brew install` never needs to compile Swift again.
+#
+# Secrets required (same PAT as bump-formula.yml):
+#   HOMEBREW_TAP_TOKEN — fine-grained PAT, Contents r/w on Silverstar187/homebrew-p2ai
+
+on:
+  workflow_run:
+    workflows: ["Bump Homebrew formula"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to bottle (e.g. v0.6.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Build one bottle per macOS target ───────────────────────────────────────
+  bottle:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            bottle_tag: arm64_sequoia
+          - os: macos-14
+            bottle_tag: arm64_sonoma
+          - os: macos-13
+            bottle_tag: ventura
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            # workflow_run doesn't expose the triggering ref directly; read from API
+            TAG=$(gh release list -R "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tap + install (build-bottle mode)
+        run: |
+          brew tap silverstar187/p2ai
+          brew install --build-bottle silverstar187/p2ai/passwort2ai
+
+      - name: Create bottle
+        id: bottle
+        run: |
+          brew bottle --no-rebuild silverstar187/p2ai/passwort2ai 2>&1 | tee /tmp/bottle_output.txt
+          BOTTLE_FILE=$(ls passwort2ai--*.bottle.tar.gz 2>/dev/null || ls passwort2ai-*.bottle.tar.gz 2>/dev/null)
+          echo "file=$BOTTLE_FILE" >> "$GITHUB_OUTPUT"
+          SHA=$(shasum -a 256 "$BOTTLE_FILE" | awk '{print $1}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "bottle_tag=${{ matrix.bottle_tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bottle to GitHub release
+        run: |
+          gh release upload "${{ steps.tag.outputs.tag }}" \
+            "${{ steps.bottle.outputs.file }}" \
+            --repo "${{ github.repository }}" \
+            --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save SHA256 as artifact
+        run: |
+          mkdir -p /tmp/bottle-sha
+          echo "${{ steps.bottle.outputs.sha }}" > "/tmp/bottle-sha/${{ matrix.bottle_tag }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bottle-sha-${{ matrix.bottle_tag }}
+          path: /tmp/bottle-sha/${{ matrix.bottle_tag }}.sha256
+
+  # ── Collect all SHA256s and update the tap formula ──────────────────────────
+  update-formula:
+    needs: bottle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            TAG=$(gh release list -R "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bottle-sha-*
+          merge-multiple: true
+          path: /tmp/bottle-sha
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: Silverstar187/homebrew-p2ai
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Inject bottle block into formula
+        working-directory: tap
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          ROOT_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          FORMULA="Formula/passwort2ai.rb"
+
+          SHA_SEQUOIA=$(cat /tmp/bottle-sha/arm64_sequoia.sha256 2>/dev/null || echo "")
+          SHA_SONOMA=$(cat   /tmp/bottle-sha/arm64_sonoma.sha256   2>/dev/null || echo "")
+          SHA_VENTURA=$(cat  /tmp/bottle-sha/ventura.sha256        2>/dev/null || echo "")
+
+          # Build bottle block (only include lines where SHA is present)
+          BOTTLE_BLOCK="  bottle do\n    root_url \"${ROOT_URL}\""
+          [[ -n "$SHA_SEQUOIA" ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sequoia: \"${SHA_SEQUOIA}\""
+          [[ -n "$SHA_SONOMA"  ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, arm64_sonoma:  \"${SHA_SONOMA}\""
+          [[ -n "$SHA_VENTURA" ]] && BOTTLE_BLOCK+="\n    sha256 cellar: :any_skip_relocation, ventura:       \"${SHA_VENTURA}\""
+          BOTTLE_BLOCK+="\n  end"
+
+          # Remove old bottle block if present, then insert after license line
+          python3 - "$FORMULA" "$BOTTLE_BLOCK" <<'PYEOF'
+          import sys, re
+          formula_path, bottle_block = sys.argv[1], sys.argv[2]
+          text = open(formula_path).read()
+          # Strip existing bottle block
+          text = re.sub(r'\n  bottle do\n.*?\n  end', '', text, flags=re.DOTALL)
+          # Insert after license line
+          text = re.sub(r'(  license "[^"]*"\n)', r'\1\n' + bottle_block + '\n', text)
+          open(formula_path, 'w').write(text)
+          PYEOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FORMULA"
+          git diff --cached --quiet && echo "No change" && exit 0
+          git commit -m "passwort2ai ${VERSION}: add bottles"
+          git push
