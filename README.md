@@ -35,8 +35,7 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 <tr><td>2 Seconds to install</td></tr>
 <tr><td>1 Second to paste Password</td></tr>
 <tr><td>AI can't see the password, just gets a closed letter</td></tr>
-<tr><td>fast mode available</td></tr>
-<tr><td>zero retention mode available</td></tr>
+<tr><td>three modes: Strict, Per-Entry, Session — pick by trade-off</td></tr>
 <tr><td>never leak again</td></tr>
 <tr><td>never search again</td></tr>
 <tr><td>all in one place, organized</td></tr>
@@ -77,11 +76,23 @@ p2ai system-prompt > .cursorrules        # or >> CLAUDE.md / .aider.conf.yml
 <summary>Install from source</summary>
 
 ```bash
-git clone --branch v0.5.0 --depth 1 https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
+git clone --branch v0.7.0 --depth 1 https://github.com/Silverstar187/passwort2ai-by-fingerprint.git ~/.passwort2ai
 ~/.passwort2ai/install.sh
 p2ai setup
 ```
 </details>
+
+### Modes
+
+p2ai has three operating modes — pick by trade-off, not by feature flag.
+
+| Mode | Command | Touch-ID | Master in RAM | Per-entry cache | Use when |
+|---|---|---|---|---|---|
+| **Strict** | _(no unlock)_ | every fetch | never | none | one-off fetches, max paranoia |
+| **Per-Entry** | `p2ai unlock --mode per-entry` | once per **new** secret | never | yes (5 min idle) | balanced — master never cached, repeated fetches stay fast |
+| **Session** | `p2ai unlock` | once per session | yes (5 min idle, 30 min hard cap) | yes | fast workflows — many fetches in a row |
+
+All modes auto-lock on screen-lock, screensaver start, idle TTL, hard cap, or `p2ai lock`.
 
 ## Daily use
 
