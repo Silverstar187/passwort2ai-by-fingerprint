@@ -3,8 +3,10 @@
 # p2ai — Passwort2AI by Fingerprint.
 # Touch-ID-gated KeePass entry retrieval for terminals + AI agents.
 #
-# Master password lives in macOS Keychain (Touch-ID gated via p2ai-master).
-# Each fetch: Touch-ID prompt → master from keychain → keepassxc-cli pulls entry.
+# Master password lives in macOS Keychain. Each fetch:
+#   1. If p2ai-agent is running → master from RAM cache (no Touch-ID)
+#   2. Else → Touch-ID via LAContext → master from keychain
+#   3. keepassxc-cli decrypts .kdbx and returns the entry value
 #
 # Usage:
 #   p2ai setup                              one-time enroll master
@@ -13,23 +15,67 @@
 #   p2ai fetch <entry> --attr UserName      different attribute (default: Password)
 #   p2ai fetch <entry> --export VAR         emit `export VAR=...` (use with eval $(p2ai fetch …))
 #   p2ai list [query]                       Touch-ID, list entries (filter optional)
+#   p2ai unlock [--ttl SEC]                 Touch-ID, start agent, master in RAM (default 300s idle)
+#   p2ai lock                               kill agent, clear master from RAM
+#   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
 #   p2ai -h                                 help
 #
 # Config:
 #   $P2AI_DB                                .kdbx path (default ~/Passwörter.kdbx)
 #   $P2AI_KEEPASSXC_CLI                     keepassxc-cli binary (default: auto-detect)
-#   $P2AI_CLEAR_SECONDS                     auto-clear delay (default 30)
+#   $P2AI_CLEAR_SECONDS                     pbcopy auto-clear delay (default 30)
+#   $P2AI_AGENT_TTL                         agent idle TTL seconds (default 300)
 
 set -euo pipefail
 
-P2AI_DB="${P2AI_DB:-$HOME/Passwörter.kdbx}"
 P2AI_CLEAR_SECONDS="${P2AI_CLEAR_SECONDS:-30}"
 P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
+P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-300}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
+P2AI_AGENT_BIN="${P2AI_AGENT_BIN:-$SCRIPT_DIR/p2ai-agent}"
+P2AI_STATE_DIR="${P2AI_STATE_DIR:-$HOME/.local/state/p2ai}"
+P2AI_SOCK="$P2AI_STATE_DIR/agent.sock"
+P2AI_PID="$P2AI_STATE_DIR/agent.pid"
+P2AI_DB_PATH_FILE="$P2AI_STATE_DIR/db.path"
+
+# Resolve DB path: explicit env-var > saved path file > default
+if [[ -z "${P2AI_DB:-}" && -r "$P2AI_DB_PATH_FILE" ]]; then
+  P2AI_DB=$(<"$P2AI_DB_PATH_FILE")
+fi
+P2AI_DB="${P2AI_DB:-$HOME/Passwörter.kdbx}"
 
 die() { printf 'p2ai: %s\n' "$*" >&2; exit 1; }
+
+# Detect 2-char macOS UI language so Touch-ID reason matches dialog framing.
+# Override via $P2AI_LANG=en|de|fr|...
+p2ai_lang() {
+  local lang="${P2AI_LANG:-}"
+  if [[ -z "$lang" ]]; then
+    lang=$(defaults read -g AppleLocale 2>/dev/null | head -1 | cut -c1-2 | tr A-Z a-z)
+  fi
+  [[ -n "$lang" ]] || lang="en"
+  printf '%s' "$lang"
+}
+
+# Localized Touch-ID reason. Args: <key> [<arg>]
+p2ai_reason() {
+  local key="$1" arg="${2:-}" lang
+  lang=$(p2ai_lang)
+  case "$key:$lang" in
+    unlock:de)  printf 'Master für Session entsperren' ;;
+    unlock:fr)  printf 'Déverrouiller le master pour la session' ;;
+    unlock:*)   printf 'Unlock master for session' ;;
+    fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
+    fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
+    fetch:*)    printf 'Fetch "%s"' "$arg" ;;
+    list:de)    printf 'Einträge auflisten' ;;
+    list:fr)    printf 'Lister les entrées' ;;
+    list:*)     printf 'List entries' ;;
+    *)          printf '%s' "$key" ;;
+  esac
+}
 
 resolve_kpcli() {
   if [[ -n "$P2AI_KEEPASSXC_CLI" && -x "$P2AI_KEEPASSXC_CLI" ]]; then
@@ -46,28 +92,155 @@ require_db() {
   [[ -r "$P2AI_DB" ]] || die "DB not readable: $P2AI_DB (set P2AI_DB)"
 }
 
+agent_running() {
+  [[ -S "$P2AI_SOCK" && -r "$P2AI_PID" ]] || return 1
+  local pid; pid=$(<"$P2AI_PID")
+  kill -0 "$pid" 2>/dev/null
+}
+
+# Send a single command to the agent socket, return its response.
+# Uses /dev/tcp-equivalent via nc (BSD nc supports -U).
+agent_send() {
+  local cmd="$1"
+  agent_running || return 1
+  printf '%s\n' "$cmd" | nc -U "$P2AI_SOCK" 2>/dev/null
+}
+
+# fetch_master <reason>
+# Returns master via stdout. Uses agent if running, else Touch-ID.
+fetch_master() {
+  local reason="${1:-unlock KeePass master}"
+  "$P2AI_MASTER_BIN" --reason "$reason"
+}
+
+pick_db_dialog() {
+  # macOS native file picker via AppleScript. Returns POSIX path or empty.
+  osascript <<'OSA' 2>/dev/null
+  try
+    set f to choose file with prompt "Select your KeePassXC database (.kdbx)" of type {"kdbx", "kdb"}
+    return POSIX path of f
+  on error number -128
+    return ""
+  end try
+OSA
+}
+
 cmd_setup() {
-  exec "$P2AI_MASTER_BIN" setup
+  # 1. Master password enrollment (Swift CLI, TTY required)
+  "$P2AI_MASTER_BIN" setup || return $?
+
+  # 2. KeePass DB path — pick via file dialog if not yet configured
+  mkdir -p "$P2AI_STATE_DIR"
+  chmod 700 "$P2AI_STATE_DIR"
+  local existing="$P2AI_DB"
+  if [[ -r "$existing" ]]; then
+    printf 'p2ai: using existing DB: %s\n' "$existing" >&2
+  else
+    printf 'p2ai: KeePass DB not found at %s\n' "$existing" >&2
+    printf 'p2ai: opening file picker — choose your .kdbx ...\n' >&2
+    local chosen; chosen=$(pick_db_dialog)
+    if [[ -z "$chosen" ]]; then
+      printf 'p2ai: cancelled. Set $P2AI_DB manually or run `p2ai setup` again.\n' >&2
+      return 1
+    fi
+    if [[ ! -r "$chosen" ]]; then
+      printf 'p2ai: chosen file not readable: %s\n' "$chosen" >&2
+      return 1
+    fi
+    printf '%s' "$chosen" > "$P2AI_DB_PATH_FILE"
+    chmod 600 "$P2AI_DB_PATH_FILE"
+    printf 'p2ai: saved DB path → %s\n' "$chosen" >&2
+  fi
+
+  # 3. Quick smoke test: list root with master to verify both work
+  printf 'p2ai: verifying master + DB ... (Touch-ID prompt)\n' >&2
+  if p2ai_lang_test=$(P2AI_DB="$existing" "$0" list >/dev/null 2>&1); then
+    printf 'p2ai: setup complete. Try `p2ai unlock` then `p2ai fetch <entry>`.\n' >&2
+  else
+    printf 'p2ai: master enrolled + DB path saved, but verification list failed. Check `p2ai list` manually.\n' >&2
+  fi
+}
+
+cmd_unlock() {
+  local ttl="$P2AI_AGENT_TTL"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ttl|-t) ttl="${2:?}"; shift 2 ;;
+      *) die "unknown unlock arg: $1" ;;
+    esac
+  done
+  mkdir -p "$P2AI_STATE_DIR"
+  chmod 700 "$P2AI_STATE_DIR"
+  if agent_running; then
+    printf 'p2ai: agent already running.\n' >&2
+    cmd_status; return
+  fi
+  # Touch-ID, get master, spawn agent in background, master via stdin.
+  local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock)") || die "auth failed"
+  ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --ttl "$ttl" >/dev/null 2>&1 ) &
+  disown
+  master=""
+  # Wait briefly for agent to bind socket + write pid
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    agent_running && break
+    sleep 0.15
+  done
+  if agent_running; then
+    printf 'p2ai: agent unlocked, idle TTL %ss.\n' "$ttl" >&2
+  else
+    die "agent failed to start"
+  fi
+}
+
+cmd_lock() {
+  if ! agent_running; then
+    printf 'p2ai: no agent running.\n' >&2
+    return 0
+  fi
+  agent_send EXIT >/dev/null 2>&1 || true
+  sleep 0.1
+  # Belt-and-suspenders: SIGTERM by pid
+  if [[ -r "$P2AI_PID" ]]; then
+    local pid; pid=$(<"$P2AI_PID")
+    kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
+  fi
+  rm -f "$P2AI_SOCK" "$P2AI_PID"
+  printf 'p2ai: agent locked.\n' >&2
+}
+
+cmd_status() {
+  if ! agent_running; then
+    printf 'p2ai: agent not running.\n'
+    return 0
+  fi
+  local resp; resp=$(agent_send STATUS)
+  printf '%s\n' "${resp:-no response}"
 }
 
 cmd_config() {
   printf 'P2AI_DB:               %s\n' "$P2AI_DB"
   printf 'P2AI_KEEPASSXC_CLI:    %s\n' "$(resolve_kpcli)"
   printf 'P2AI_CLEAR_SECONDS:    %s\n' "$P2AI_CLEAR_SECONDS"
-  printf 'master-bin:           %s\n' "$P2AI_MASTER_BIN"
-  printf 'db readable:          %s\n' "$([[ -r "$P2AI_DB" ]] && echo yes || echo NO)"
+  printf 'P2AI_AGENT_TTL:        %s\n' "$P2AI_AGENT_TTL"
+  printf 'master-bin:            %s\n' "$P2AI_MASTER_BIN"
+  printf 'agent-bin:             %s\n' "$P2AI_AGENT_BIN"
+  printf 'state dir:             %s\n' "$P2AI_STATE_DIR"
+  printf 'db readable:           %s\n' "$([[ -r "$P2AI_DB" ]] && echo yes || echo NO)"
+  printf 'agent running:         %s\n' "$(agent_running && echo yes || echo no)"
 }
 
 cmd_list() {
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
   local query="${1:-}"
-  local master; master=$("$P2AI_MASTER_BIN") || die "auth failed"
+  local master; master=$(fetch_master "$(p2ai_reason list)") || die "auth failed"
   if [[ -n "$query" ]]; then
     printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null | grep -i -- "$query" || true
   else
     printf '%s' "$master" | "$kpcli" ls -R "$P2AI_DB" 2>/dev/null
   fi
+  master=""
 }
 
 cmd_fetch() {
@@ -85,7 +258,11 @@ cmd_fetch() {
   [[ -n "$entry" ]] || die "usage: p2ai fetch <entry> [--attr X] [--print|--export VAR]"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
-  local master; master=$("$P2AI_MASTER_BIN") || die "auth failed"
+
+  # Touch-ID dialog reason includes entry name so user knows what's asked.
+  local reason
+  reason=$(p2ai_reason fetch "$entry")
+  local master; master=$(fetch_master "$reason") || die "auth failed"
 
   local secret
   secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null | tail -1) || die "entry not found: $entry"
@@ -97,7 +274,6 @@ cmd_fetch() {
       printf '%s\n' "$secret"
       ;;
     export|export-noclear)
-      # Single-quoted, embedded single-quote escaped via concat trick
       local esc; esc=$(printf '%s' "$secret" | sed "s/'/'\\\\''/g")
       printf "export %s='%s'\n" "$var" "$esc"
       ;;
@@ -125,9 +301,12 @@ main() {
     setup)            cmd_setup "$@" ;;
     fetch|f|get)      cmd_fetch "$@" ;;
     list|ls)          cmd_list "$@" ;;
+    unlock|u)         cmd_unlock "$@" ;;
+    lock|l)           cmd_lock "$@" ;;
+    status|s)         cmd_status "$@" ;;
     config|cfg)       cmd_config ;;
     -h|--help|help|"")
-      sed -n '5,28p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '5,32p' "$0" | sed 's/^# \{0,1\}//'
       ;;
     *) die "unknown command: $cmd (try: p2ai -h)" ;;
   esac

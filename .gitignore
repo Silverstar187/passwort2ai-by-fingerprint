@@ -1,3 +1,7 @@
+# compiled binaries — built by install.sh per machine arch
+bin/p2ai-master
+bin/p2ai-agent
+
 .DS_Store
 *.swp
 *.swo
