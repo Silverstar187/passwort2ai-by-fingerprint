@@ -88,7 +88,7 @@ jobs:
           mkdir -p /tmp/bottle-sha
           echo "${{ steps.bottle.outputs.sha }}" > "/tmp/bottle-sha/${{ matrix.bottle_tag }}.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bottle-sha-${{ matrix.bottle_tag }}
           path: /tmp/bottle-sha/${{ matrix.bottle_tag }}.sha256
