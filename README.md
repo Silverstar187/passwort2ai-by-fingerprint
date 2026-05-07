@@ -136,7 +136,19 @@ ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master lives in
 
 ## Scope
 
-p2ai sits between your KeePass DB and the AI tools you use day-to-day. It eliminates one anti-pattern (pasting secrets in chat). It is not a KeePass replacement, not new crypto, not host hardening. Trust model matches `ssh-agent`: a compromised host or same-user process can read agent RAM, clipboard, or env-vars. For tighter isolation use `--mode per-entry` or `p2ai lock` after each session.
+p2ai sits between your KeePass DB and the AI tools you use day-to-day. It eliminates one anti-pattern (pasting secrets in chat). It is not a KeePass replacement, not new crypto, not host hardening. Trust model matches `ssh-agent`: a compromised host or same-user process can read agent RAM, clipboard, or env-vars. For tighter isolation use `--once-per-entry` or `p2ai lock` after each session.
+
+### ⚠️ Caveat: `lock` only protects what lives in the kdbx
+
+`p2ai lock` revokes the agent's RAM cache. It does **not** revoke credentials your machine stores elsewhere — git's `osxkeychain` helper, your shell's exported `*_API_KEY` vars, `.env` / `.netrc` / `~/.npmrc` files, ssh-agent, browser-saved tokens. Those keep working after `p2ai lock` because p2ai never owned them.
+
+For `lock` to mean "all my passwords are inaccessible until Touch-ID":
+
+1. **Import every credential into the kdbx** (see [#5](https://github.com/Silverstar187/passwort2ai-by-fingerprint/issues/5) — `p2ai import` planned for v0.10.0).
+2. **Remove the originals** from their old stores (`p2ai consolidate`).
+3. **Keep the master Keychain-gated** — `passwort2ai-master` entry has `LAContext.deviceOwnerAuthenticationWithBiometrics` ACL, so without your finger it stays locked.
+
+Until step 1+2 are done, `p2ai lock` is a partial defence: AI agents that go through `p2ai run` lose access; everything else keeps its session.
 
 > **macOS only.** Built on Touch-ID, Keychain, and `LAContext`.
 
