@@ -89,10 +89,13 @@ p2ai_reason() {
   lang=$(p2ai_lang)
   case "$key:$lang" in
     # YOLO unlock — strong, multi-emoji warning. User authorizes ALL fetches.
-    # Per-entry mode has no upfront Touch-ID — first prompt is per fetch.
     unlock-auto:de)  printf '🚨 YOLO-Mode aktivieren — ALLE Passwörter freigeben auf Anfrage 🚨' ;;
     unlock-auto:fr)  printf '🚨 Mode YOLO — autoriser TOUS les mots de passe à la demande 🚨' ;;
     unlock-auto:*)   printf '🚨 YOLO mode — release ALL passwords on request 🚨' ;;
+    # Per-Entry unlock — light warning, explicit gesture before mode activates.
+    unlock-per-entry:de)  printf '⚠️ Per-Entry-Mode aktivieren — 1× Tap pro neuem Passwort' ;;
+    unlock-per-entry:fr)  printf '⚠️ Activer le mode Per-Entry — 1× tap par nouveau mot de passe' ;;
+    unlock-per-entry:*)   printf '⚠️ Activate Per-Entry mode — 1× tap per new password' ;;
     # Per-fetch — neutral, user explicitly initiated this single fetch.
     fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
     fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
@@ -399,7 +402,9 @@ cmd_unlock() {
     disown
     master=""
   else
-    # per-entry: no upfront Touch-ID, agent ready to cache entries on first fetch
+    # per-entry: explicit Touch-ID gesture to activate the mode. Master is
+    # NOT stored — discarded immediately. The agent never caches it.
+    "$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock-per-entry)" >/dev/null || die "auth failed"
     ( nohup "$P2AI_AGENT_BIN" --mode per-entry --ttl "$ttl" </dev/null >/dev/null 2>&1 ) &
     disown
   fi
