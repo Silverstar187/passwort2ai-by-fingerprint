@@ -62,12 +62,13 @@ p2ai attachment "<entry>"                          # list attachment names
 p2ai attachment "<entry>" "name.json" -o file.json # export to file
 p2ai attachment "<entry>" "name.txt" --pbcopy      # text → clipboard
 
-# Session caching (Touch-ID once, fetch many)
-p2ai unlock                          # default: master + entries cached, 5min idle TTL
-p2ai unlock --mode per-entry         # master never cached, entries cached after first hit
-p2ai unlock --ttl 600                # custom idle TTL (hard cap: 30min)
+# Modes (Touch-ID once, fetch many)
+p2ai unlock --yolo                   # YOLO: 1× tap, unlimited until screen-lock or `p2ai lock`
+p2ai unlock --once-per-entry         # Per Entry: 1× tap per password, 30min idle TTL
+p2ai unlock --yolo --ttl 600         # override default idle (10 min)
+p2ai unlock --once-per-entry --ttl -1 # override: never idle out
 p2ai status                          # mode + remaining TTL + cached entry count
-p2ai lock                            # clear all RAM caches
+p2ai lock                            # → Strict mode (every fetch needs Touch-ID)
 
 # Setup
 p2ai setup                 # master enrollment + .kdbx file picker
@@ -91,7 +92,7 @@ p2ai setup                 # master enrollment + .kdbx file picker
 
 ## Configuration
 
-- `$P2AI_DB`: KeePass `.kdbx` path (default `~/Passwörter.kdbx`, override via state file from `p2ai setup`)
+- `$P2AI_DB`: KeePass `.kdbx` path (default `~/passwords.kdbx`, override via state file from `p2ai setup`)
 - `$P2AI_KEEPASSXC_CLI`: override binary path (auto-detects `~/bin`, Homebrew, `/Applications/KeePassXC.app/Contents/MacOS/`)
 - `$P2AI_CLEAR_SECONDS`: clipboard auto-clear delay (default 30)
 - `$P2AI_AGENT_TTL`: agent idle TTL seconds (default 300)
@@ -103,7 +104,7 @@ p2ai setup                 # master enrollment + .kdbx file picker
 - Master password lives in macOS Keychain (`p2ai-master`). Every retrieval is gated by `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`, Touch-ID is the only auth gate.
 - Master is held in shell-variable scope for one `keepassxc-cli` call, then cleared. With `p2ai unlock`, master moves into the agent process's RAM with idle TTL + auto-lock on screen-lock / screensaver Distributed Notifications.
 - **Storage:** KeePass `.kdbx` (encrypted, persistent). The DB is the single source of truth.
-- **Runtime cache:** `p2ai-agent` process RAM only. Ephemeral, dies on lock / screen-lock / idle / hard-cap.
+- **Runtime cache:** `p2ai-agent` process RAM only. Ephemeral, dies on `p2ai lock`, screen-lock, or idle TTL (Per Entry: 30min default; YOLO: disabled by default).
 - **Egress (legit):** clipboard (auto-clear 30s) and `p2ai run` (subshell-fork, env in child only). Never disk, never stdout, never the parent shell's env.
 - `rm`, `edit`, `mv` invalidate cached entries automatically, rotated passwords don't linger.
 
