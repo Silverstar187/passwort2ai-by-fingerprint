@@ -1,0 +1,83 @@
+name: Version Drift Check
+
+# Verifies that P2AI_VERSION in bin/p2ai matches the latest pushed tag.
+# Prevents the failure mode in issue #10:
+#   - Maintainer tags v0.10.0
+#   - Forgets to bump P2AI_VERSION="0.9.x" in bin/p2ai
+#   - Released binary lies about its own version
+#
+# Runs on every push to main + every PR targeting main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need tags
+
+      - name: Extract embedded version
+        id: embedded
+        run: |
+          v=$(grep -m1 -oE '^P2AI_VERSION="[^"]+"' bin/p2ai | cut -d'"' -f2)
+          if [ -z "$v" ]; then
+            echo "::error::P2AI_VERSION constant not found in bin/p2ai"
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Extract latest tag
+        id: tag
+        run: |
+          # Sort tags semver-style, pick highest
+          tag=$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)
+          if [ -z "$tag" ]; then
+            echo "::warning::no v*.*.* tags yet — skipping drift check"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions
+        run: |
+          embedded='${{ steps.embedded.outputs.version }}'
+          tag='${{ steps.tag.outputs.version }}'
+
+          echo "Embedded P2AI_VERSION = $embedded"
+          echo "Latest tag            = ${tag:-<none>}"
+
+          if [ -z "$tag" ]; then
+            echo "No tags yet — skip"
+            exit 0
+          fi
+
+          # Embedded must be >= tag (HEAD is always at-or-ahead of latest release).
+          # We accept embedded == tag (released, no new work) or embedded > tag
+          # (in-flight work toward the next release).
+          # We REJECT embedded < tag (forgot to bump before tagging).
+          highest=$(printf '%s\n%s\n' "$embedded" "$tag" | sort -V | tail -1)
+          if [ "$highest" = "$embedded" ]; then
+            echo "✓ embedded version is at-or-ahead of latest tag"
+          else
+            echo "::error::P2AI_VERSION ($embedded) < latest tag ($tag) — bump bin/p2ai before tagging"
+            exit 1
+          fi
+
+      - name: Verify CHANGELOG entry exists for embedded version
+        run: |
+          v='${{ steps.embedded.outputs.version }}'
+          if grep -qE "^## \[${v}\] - " CHANGELOG.md; then
+            echo "✓ CHANGELOG section [$v] exists"
+          else
+            echo "::warning::CHANGELOG.md has no '## [$v]' section — add one before the next release"
+          fi

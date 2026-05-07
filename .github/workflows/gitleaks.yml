@@ -1,0 +1,28 @@
+name: Gitleaks
+
+# Scans every push + PR for accidentally committed secrets (API keys, tokens,
+# private keys). Critical for a security-tool repo: a leaked test credential
+# would directly contradict the project's claims.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history, so we catch old commits too
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
