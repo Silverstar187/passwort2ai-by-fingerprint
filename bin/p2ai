@@ -21,8 +21,9 @@
 #   p2ai mv <entry> <group>                 move entry to another group
 #   p2ai otp <entry>                        TOTP → pbcopy + auto-clear (or --export VAR)
 #   p2ai list [query]                       Touch-ID, list entries (filter optional)
-#   p2ai unlock [--mode auto|per-entry]     Touch-ID, start agent
-#                  [--ttl SEC]                  default mode=auto, ttl=300s idle (auto only)
+#   p2ai unlock --yolo                      1× tap, unlimited until screen-lock
+#   p2ai unlock --once-per-entry            1× tap per password, 30 min idle
+#                  [--ttl SEC]                  override default idle (-1 = unlimited)
 #   p2ai lock                               kill agent, clear master from RAM
 #   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
@@ -87,12 +88,15 @@ p2ai_reason() {
   local key="$1" arg="${2:-}" lang
   lang=$(p2ai_lang)
   case "$key:$lang" in
-    unlock:de)  printf '⚠️ Master für Session entsperren' ;;
-    unlock:fr)  printf '⚠️ Déverrouiller le master pour la session' ;;
-    unlock:*)   printf '⚠️ Unlock master for session' ;;
-    fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
-    fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
-    fetch:*)    printf 'Fetch "%s"' "$arg" ;;
+    # YOLO unlock — strong, multi-emoji warning. User authorizes ALL fetches.
+    # Per-entry mode has no upfront Touch-ID — first prompt is per fetch.
+    unlock-auto:de)  printf '🚨 YOLO-Mode aktivieren — ALLE Passwörter freigeben auf Anfrage 🚨' ;;
+    unlock-auto:fr)  printf '🚨 Mode YOLO — autoriser TOUS les mots de passe à la demande 🚨' ;;
+    unlock-auto:*)   printf '🚨 YOLO mode — release ALL passwords on request 🚨' ;;
+    # Per-fetch — light warning, single secret released.
+    fetch:de)   printf '⚠️ Eintrag "%s" abrufen' "$arg" ;;
+    fetch:fr)   printf "⚠️ Récupérer l'entrée \"%s\"" "$arg" ;;
+    fetch:*)    printf '⚠️ Fetch "%s"' "$arg" ;;
     add:de)     printf 'Eintrag "%s" hinzufügen' "$arg" ;;
     add:fr)     printf 'Ajouter l\047entrée "%s"' "$arg" ;;
     add:*)      printf 'Add "%s"' "$arg" ;;
@@ -390,7 +394,7 @@ cmd_unlock() {
 
   if [[ "$mode" == "auto" ]]; then
     # Touch-ID upfront; master to agent via stdin
-    local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock)") || die "auth failed"
+    local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock-auto)") || die "auth failed"
     ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --mode auto --ttl "$ttl" >/dev/null 2>&1 ) &
     disown
     master=""
