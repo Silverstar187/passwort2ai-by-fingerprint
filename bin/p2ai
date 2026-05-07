@@ -1046,7 +1046,9 @@ USAGE
 
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
-  local master; master=$(fetch_master "$(p2ai_reason fetch run)") || die "auth failed"
+  # Lazy master fetch: only Touch-ID if at least one entry isn't cached.
+  # In per-entry mode this means cache-only runs are silent and instant.
+  local master=""
 
   # Fetch every requested secret. Cache via agent if running.
   local -a env_kv=()
@@ -1070,6 +1072,10 @@ USAGE
       [[ -n "$cached" && "$cached" != "MISS" ]] && secret="$cached"
     fi
     if [[ -z "$secret" ]]; then
+      # First cache miss → fetch master once, reuse for any further misses
+      if [[ -z "$master" ]]; then
+        master=$(fetch_master "$(p2ai_reason fetch run)") || die "auth failed"
+      fi
       secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) \
         || die "entry not found: $entry"
       [[ -n "$secret" ]] || die "empty value for $entry / $attr"
