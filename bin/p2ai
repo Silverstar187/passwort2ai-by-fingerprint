@@ -442,6 +442,8 @@ cmd_lock() {
   fi
   rm -f "$P2AI_SOCK" "$P2AI_PID"
   printf 'p2ai: agent locked.\n' >&2
+  # Notify on transition back to Strict mode (no agent = strict).
+  osascript -e 'display notification "Jeder Fetch braucht Touch-ID. Default-Zustand." with title "🔒 p2ai: Strict-Mode aktiv" sound name "Glass"' 2>/dev/null || true
 }
 
 cmd_status() {
