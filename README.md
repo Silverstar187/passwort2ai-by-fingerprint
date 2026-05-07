@@ -136,7 +136,9 @@ ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master lives in
 
 ## Scope
 
-p2ai sits between your KeePass DB and the AI tools you use day-to-day. It eliminates one anti-pattern (pasting secrets in chat). It is not a KeePass replacement, not new crypto, not host hardening. Trust model matches `ssh-agent`: a compromised host or same-user process can read agent RAM, clipboard, or env-vars. For tighter isolation use `--once-per-entry` or `p2ai lock` after each session.
+p2ai sits between your KeePass DB and the AI tools you use day-to-day. It eliminates one anti-pattern (pasting secrets in chat). It is not a KeePass replacement, not new crypto, not host hardening.
+
+The default mode is **Strict** — every fetch requires a fresh Touch-ID, nothing is cached. **Per Entry** and **YOLO** trade Touch-ID friction for speed by caching the master plus fetched entries in the agent's RAM; in those modes the trust model matches `ssh-agent` (a compromised host or same-user process can read agent RAM, clipboard, or env-vars). `p2ai lock`, screen-lock, and idle TTL revoke that cache instantly.
 
 > **When does p2ai actually help vs just using `security`?** See the [feature comparison + roadmap gist](https://gist.github.com/Silverstar187/b7eeb1dcb196cd4abc2b2aea82b22da0) — every row marks whether p2ai supports it today, plans to, or considers it out of scope.
 
