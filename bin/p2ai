@@ -93,10 +93,10 @@ p2ai_reason() {
     unlock-auto:de)  printf '🚨 YOLO-Mode aktivieren — ALLE Passwörter freigeben auf Anfrage 🚨' ;;
     unlock-auto:fr)  printf '🚨 Mode YOLO — autoriser TOUS les mots de passe à la demande 🚨' ;;
     unlock-auto:*)   printf '🚨 YOLO mode — release ALL passwords on request 🚨' ;;
-    # Per-fetch — light warning, single secret released.
-    fetch:de)   printf '⚠️ Eintrag "%s" abrufen' "$arg" ;;
-    fetch:fr)   printf "⚠️ Récupérer l'entrée \"%s\"" "$arg" ;;
-    fetch:*)    printf '⚠️ Fetch "%s"' "$arg" ;;
+    # Per-fetch — neutral, user explicitly initiated this single fetch.
+    fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
+    fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
+    fetch:*)    printf 'Fetch "%s"' "$arg" ;;
     add:de)     printf 'Eintrag "%s" hinzufügen' "$arg" ;;
     add:fr)     printf 'Ajouter l\047entrée "%s"' "$arg" ;;
     add:*)      printf 'Add "%s"' "$arg" ;;
@@ -411,6 +411,13 @@ cmd_unlock() {
   done
   if agent_running; then
     printf 'p2ai: agent unlocked (mode=%s, idle TTL %ss).\n' "$mode" "$ttl" >&2
+    # macOS notification so the user notices the mode change even if the
+    # Touch-ID dialog was tapped reflexively.
+    if [[ "$mode" == "auto" ]]; then
+      osascript -e 'display notification "ALLE Passwörter freigeben auf Anfrage. Lock: screen-lock oder p2ai lock." with title "🚨 p2ai: YOLO-Mode aktiv" sound name "Sosumi"' 2>/dev/null || true
+    else
+      osascript -e 'display notification "1× Touch-ID pro neuem Eintrag. Idle-Lock nach 30 min." with title "⚠️ p2ai: Per-Entry-Mode aktiv" sound name "Tink"' 2>/dev/null || true
+    fi
   else
     die "agent failed to start"
   fi
