@@ -21,8 +21,8 @@
 #   p2ai mv <entry> <group>                 move entry to another group
 #   p2ai otp <entry>                        TOTP → pbcopy + auto-clear (or --export VAR)
 #   p2ai list [query]                       Touch-ID, list entries (filter optional)
-#   p2ai unlock [--mode session|per-entry]  Touch-ID, start agent
-#                  [--ttl SEC]                  default mode=session, ttl=300s idle
+#   p2ai unlock [--mode auto|per-entry]     Touch-ID, start agent
+#                  [--ttl SEC]                  default mode=auto, ttl=300s idle (auto only)
 #   p2ai lock                               kill agent, clear master from RAM
 #   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
@@ -342,16 +342,18 @@ setup_check_skill() {
 }
 
 cmd_unlock() {
-  local ttl="$P2AI_AGENT_TTL" mode="session"
+  local ttl="$P2AI_AGENT_TTL" mode="auto"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ttl|-t)  ttl="${2:?}"; shift 2 ;;
       --mode|-m) mode="${2:?}"; shift 2 ;;
-      session|per-entry) mode="$1"; shift ;;
-      *) die "unknown unlock arg: $1 (try --mode session|per-entry --ttl SEC)" ;;
+      auto|session|per-entry) mode="$1"; shift ;;
+      *) die "unknown unlock arg: $1 (try --mode auto|per-entry --ttl SEC)" ;;
     esac
   done
-  case "$mode" in session|per-entry) ;; *) die "mode must be session or per-entry" ;; esac
+  # Accept "session" as a back-compat alias for the renamed "auto" mode.
+  [[ "$mode" == "session" ]] && mode="auto"
+  case "$mode" in auto|per-entry) ;; *) die "mode must be auto or per-entry" ;; esac
 
   mkdir -p "$P2AI_STATE_DIR"
   chmod 700 "$P2AI_STATE_DIR"
@@ -360,10 +362,10 @@ cmd_unlock() {
     cmd_status; return
   fi
 
-  if [[ "$mode" == "session" ]]; then
+  if [[ "$mode" == "auto" ]]; then
     # Touch-ID upfront; master to agent via stdin
     local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock)") || die "auth failed"
-    ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --mode session --ttl "$ttl" >/dev/null 2>&1 ) &
+    ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --mode auto --ttl "$ttl" >/dev/null 2>&1 ) &
     disown
     master=""
   else

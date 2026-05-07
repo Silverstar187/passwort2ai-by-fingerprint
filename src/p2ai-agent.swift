@@ -2,15 +2,16 @@
 //
 // p2ai-agent — short-lived in-memory secret cache (master + per-entry).
 //
-//   p2ai-agent --mode session   [--ttl N]   (default)
+//   p2ai-agent --mode auto   [--ttl N]   (default)
 //     - Reads master from stdin, holds it + entries in RAM.
 //     - Touch-ID is only required to start the agent; subsequent fetches use
 //       the cached master and (after first hit) the cached entry value.
+//     - "session" accepted as back-compat alias.
 //
 //   p2ai-agent --mode per-entry [--ttl N]
 //     - Does NOT cache the master. New entries always require a fresh
-//       master (Touch-ID); already-fetched entries are cached and skip
-//       Touch-ID until idle expires.
+//       master (Touch-ID); already-fetched entries are cached.
+//     - No idle TTL — only screen-lock or hard cap end the session.
 //     - No stdin needed at startup.
 //
 // Protocol (one command per connection, line-terminated):
@@ -21,8 +22,9 @@
 //                           server reads until EOF after PUTENTRY <name>\n)
 //   INVALIDATE <prefix>  → drop all entries with key == prefix or prefix:*
 //                          replies "OK N" (count dropped)
-//   MODE                 → "session" | "per-entry"
+//   MODE                 → "auto" | "per-entry"
 //   STATUS               → "OK ttl_idle=N ttl_abs=N entries=N pid=N mode=X"
+//                          (ttl_idle=-1 means n/a in per-entry mode)
 //   EXIT                 → cleanup + die
 //
 // Auto-locks on idle TTL, hard cap, screen-lock, screensaver, signals.
@@ -45,8 +47,14 @@ let sockPath = "\(stateDir)/agent.sock"
 let pidPath  = "\(stateDir)/agent.pid"
 
 enum AgentMode: String {
-    case session    // master + entries cached
+    case auto       // master + entries cached. Default. (alias: session)
     case perEntry = "per-entry"  // entries only, master fetched fresh each new entry
+
+    static func parse(_ s: String) -> AgentMode? {
+        // Accept "session" as a back-compat alias for the renamed "auto".
+        if s == "session" { return .auto }
+        return AgentMode(rawValue: s)
+    }
 }
 
 func die(_ msg: String, _ code: Int32 = 1) -> Never {
@@ -75,7 +83,7 @@ func cleanup() {
 
 // ---- Args ----
 var idleTtl = DEFAULT_TTL
-var mode: AgentMode = .session
+var mode: AgentMode = .auto
 let args = CommandLine.arguments.dropFirst()
 var i = args.startIndex
 while i < args.endIndex {
@@ -86,12 +94,12 @@ while i < args.endIndex {
         idleTtl = min(max(v, 30), HARD_LIMIT)
     case "--mode":
         i = args.index(after: i)
-        guard i < args.endIndex, let m = AgentMode(rawValue: args[i]) else {
-            die("--mode requires session|per-entry")
+        guard i < args.endIndex, let m = AgentMode.parse(args[i]) else {
+            die("--mode requires auto|per-entry")
         }
         mode = m
     case "-h", "--help":
-        print("p2ai-agent --mode session|per-entry [--ttl SECONDS]")
+        print("p2ai-agent --mode auto|per-entry [--ttl SECONDS]")
         exit(0)
     default:
         die("unknown arg: \(args[i])")
@@ -101,7 +109,7 @@ while i < args.endIndex {
 
 // ---- Read master from stdin (session mode only) ----
 var master: Data = Data()
-if mode == .session {
+if mode == .auto {
     let stdin = FileHandle.standardInput
     guard let masterData = try? stdin.readToEnd(), !masterData.isEmpty else {
         die("no master on stdin (required for session mode)")
@@ -192,7 +200,7 @@ idleTimer.setEventHandler {
     // Per-entry mode skips the idle TTL: master is never cached, so the
     // session-promise "1× Touch-ID per entry" stays intact for the full
     // hard-cap window. Screen-lock and the hard cap are the real resets.
-    let idleExpired = mode == .session && now.timeIntervalSince(lastTouch) >= idleTtl
+    let idleExpired = mode == .auto && now.timeIntervalSince(lastTouch) >= idleTtl
     if idleExpired || now.timeIntervalSince(started) >= HARD_LIMIT {
         cleanup()
         exit(0)
@@ -277,7 +285,7 @@ acceptQueue.async {
 
         switch cmd {
         case "GET":
-            if mode == .session && !master.isEmpty {
+            if mode == .auto && !master.isEmpty {
                 writeAll(client, master)
                 lastTouch = Date()
             } else {
@@ -315,7 +323,7 @@ acceptQueue.async {
             // In per-entry mode the idle TTL is disabled (mode docs promise
             // "1× per entry per session"). Report -1 so clients can render
             // it as "n/a" instead of a countdown that never triggers.
-            let idleLeft: Int = mode == .session
+            let idleLeft: Int = mode == .auto
                 ? Int(max(0, idleTtl - now.timeIntervalSince(lastTouch)))
                 : -1
             let absLeft  = max(0, HARD_LIMIT - now.timeIntervalSince(started))
