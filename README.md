@@ -35,7 +35,7 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 <tr><td>2 Seconds to install</td></tr>
 <tr><td>1 Second to paste Password</td></tr>
 <tr><td>AI can't see the password, just gets a closed letter</td></tr>
-<tr><td>three modes: Strict, Per Entry, Auto — pick by trade-off</td></tr>
+<tr><td>three modes: Strict, Per Entry, YOLO — pick by trade-off</td></tr>
 <tr><td>never leak again</td></tr>
 <tr><td>never search again</td></tr>
 <tr><td>all in one place, organized</td></tr>
@@ -84,10 +84,10 @@ p2ai setup
 
 ### Modes
 
-|  | **Strict** | **Per Entry** | **Auto** |
+|  | **Strict** | **Per Entry** | **YOLO** |
 |---|---|---|---|
 | Touch-ID | every fetch | once per password | once per session |
-| Command | _(default)_ | `p2ai unlock --once-per-entry` | `p2ai unlock --yolo` |
+| Command | _(default — or `p2ai lock`)_ | `p2ai unlock --once-per-entry` | `p2ai unlock --yolo` |
 
 Session ends on screen lock or `p2ai lock`. Per Entry also locks after 30 min idle.
 
@@ -115,7 +115,7 @@ p2ai rm "<entry>" [-f]                            # delete
 p2ai mv "<entry>" "Group/Subgroup"                # move
 
 # Modes — see Modes table above
-p2ai unlock --yolo                                # Auto: 1× tap, unlimited until screen-lock
+p2ai unlock --yolo                                # YOLO: 1× tap, unlimited until screen-lock
 p2ai unlock --once-per-entry                      # Per Entry: 1× tap per password, 30min idle
 p2ai unlock --yolo --ttl 600                      # override default idle (10 min)
 p2ai unlock --once-per-entry --ttl -1             # override: never idle out
