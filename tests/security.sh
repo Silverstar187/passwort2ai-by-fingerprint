@@ -423,10 +423,11 @@ if [[ ! -x "$REAL_MASTER_BIN" ]]; then
   skip "18a-c: real p2ai-master binary not built — run install.sh"
 else
   # 18a: direct invocation without env → refuse, master MUST NOT appear
-  out=$("$REAL_MASTER_BIN" --reason "test 18a" 2>&1 </dev/null || true)
-  rc=$?
+  # Capture rc properly: `|| true` was masking the real exit code as 0.
+  rc=0
+  out=$("$REAL_MASTER_BIN" --reason "test 18a" 2>&1 </dev/null) || rc=$?
   if [[ "$out" == *"refusing to emit master on stdout"* ]] && [[ "$rc" -ne 0 ]]; then
-    pass "18a: direct invocation refused without P2AI_MASTER_PIPE_OK"
+    pass "18a: direct invocation refused without P2AI_MASTER_PIPE_OK (rc=$rc)"
   else
     fail "18a: direct invocation NOT refused (rc=$rc, output: ${out:0:80})"
   fi
