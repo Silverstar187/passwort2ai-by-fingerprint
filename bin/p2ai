@@ -59,7 +59,7 @@ P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
 # passed and this var is unset. Setting it overrides both.
 P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-P2AI_VERSION="0.9.3"
+P2AI_VERSION="0.9.4"
 P2AI_REPO_API="https://api.github.com/repos/Silverstar187/passwort2ai-by-fingerprint"
 P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
 P2AI_AGENT_BIN="${P2AI_AGENT_BIN:-$SCRIPT_DIR/p2ai-agent}"
@@ -188,7 +188,7 @@ fetch_master() {
   # (including any embedded newlines) up to EOF or the timeout, never
   # touching disk. read returns nonzero on EOF-without-delim but $master
   # is populated — we check the var, not the rc.
-  exec 9< <("$P2AI_MASTER_BIN" --reason "$reason")
+  exec 9< <(P2AI_MASTER_PIPE_OK=1 "$P2AI_MASTER_BIN" --reason "$reason")
   local master=""
   IFS= read -r -t "$timeout" -d '' master <&9 || true
   exec 9<&-
@@ -242,7 +242,7 @@ cmd_setup() {
     local kpcli; kpcli=$(resolve_kpcli)
     printf 'p2ai: no DB found — creating new database at %s\n' "$existing" >&2
     # Fetch master from keychain (just enrolled above) to create DB with same password
-    local master; master=$("$P2AI_MASTER_BIN" --reason "Create KeePass database") || {
+    local master; master=$(P2AI_MASTER_PIPE_OK=1 "$P2AI_MASTER_BIN" --reason "Create KeePass database") || {
       printf 'p2ai: Touch-ID cancelled — cannot create DB.\n' >&2; return 1
     }
     # Capture stderr to a temp so we can show diagnostic on failure
@@ -401,14 +401,15 @@ cmd_unlock() {
 
   if [[ "$mode" == "auto" ]]; then
     # Touch-ID upfront; master to agent via stdin
-    local master; master=$("$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock-auto)") || die "auth failed"
+    local master; master=$(P2AI_MASTER_PIPE_OK=1 "$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock-auto)") || die "auth failed"
     ( printf '%s' "$master" | nohup "$P2AI_AGENT_BIN" --mode auto --ttl "$ttl" >/dev/null 2>&1 ) &
     disown
     master=""
   else
     # per-entry: explicit Touch-ID gesture to activate the mode. Master is
     # NOT stored — discarded immediately. The agent never caches it.
-    "$P2AI_MASTER_BIN" --reason "$(p2ai_reason unlock-per-entry)" >/dev/null || die "auth failed"
+    # Per-entry mode: only need Touch-ID gesture, master is fetched lazily later
+    "$P2AI_MASTER_BIN" --auth-only --reason "$(p2ai_reason unlock-per-entry)" || die "auth failed"
     ( nohup "$P2AI_AGENT_BIN" --mode per-entry --ttl "$ttl" </dev/null >/dev/null 2>&1 ) &
     disown
   fi
@@ -767,7 +768,8 @@ USAGE
 
     local cur_mode; cur_mode="$(agent_mode 2>/dev/null || true)"
     if [[ "$cur_mode" == "per-entry" ]]; then
-      "$P2AI_MASTER_BIN" --reason "Save attachment '$name' to disk (leak risk)" >/dev/null \
+      # --auth-only: Touch-ID gesture only, master never crosses the pipe (issue #8)
+      "$P2AI_MASTER_BIN" --auth-only --reason "Save attachment '$name' to disk (leak risk)" \
         || die "cancelled — no file written"
     fi
     # In Strict mode, fetch_master below triggers Touch-ID with leak-aware reason

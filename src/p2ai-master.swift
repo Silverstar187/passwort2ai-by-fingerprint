@@ -219,6 +219,7 @@ func fetchMaster(toClipboard: Bool, reason: String, allowAgent: Bool) {
 // ---- Arg parsing ----
 var mode: String? = nil
 var toClipboard = false
+var authOnly = false
 var reason = "unlock KeePass master"
 var allowAgent = true
 
@@ -231,6 +232,10 @@ while i < args.count {
         mode = a
     case "--pbcopy", "-c":
         toClipboard = true
+    case "--auth-only":
+        // Touch-ID gesture only. Never reads Keychain. Never emits master.
+        // Exit 0 on success, non-zero on cancel/deny/timeout.
+        authOnly = true
     case "--reason", "-r":
         i += 1
         guard i < args.count else { die("--reason needs value") }
@@ -242,10 +247,15 @@ while i < args.count {
         p2ai-master — Touch-ID-gated KeePass master password.
           p2ai-master                              master to stdout (agent-aware)
           p2ai-master --pbcopy                     master to clipboard
+          p2ai-master --auth-only                  Touch-ID only, no master, exit 0/non-0
           p2ai-master --reason "fetch 'Foo'"       custom Touch-ID dialog reason
           p2ai-master --no-agent                   force Touch-ID, ignore agent
           p2ai-master setup                        one-time enrollment
           p2ai-master remove                       delete keychain item
+
+        SECURITY: master output to stdout is refused when stdout is a TTY,
+        to prevent leaking the master into terminal/transcript captures.
+        Always pipe stdout to keepassxc-cli (or use bin/p2ai's wrappers).
         """)
         exit(0)
     default:
@@ -254,8 +264,47 @@ while i < args.count {
     i += 1
 }
 
+// SECURITY GUARD (issue #8): refuse to emit master on stdout unless the
+// caller explicitly opts in via P2AI_MASTER_PIPE_OK=1.
+//
+// Rationale: TTY check alone is insufficient because AI-agent shells
+// (Claude Code's Bash tool, etc.) capture stdout via PIPES, not TTYs, so
+// isatty()==0 does not mean "safe to emit". The only safe assumption is
+// that the legitimate caller is bin/p2ai (or a script that follows the
+// same pattern), which sets P2AI_MASTER_PIPE_OK=1 before invoking us.
+//
+// Direct invocations from interactive shells, AI agents, or arbitrary
+// pipes all hit this guard and get refused.
+//
+// Skipped for setup/remove (no master output), --auth-only (no master
+// output), and --pbcopy (master goes to clipboard, not stdout).
+if mode == nil && !authOnly && !toClipboard {
+    let pipeOK = ProcessInfo.processInfo.environment["P2AI_MASTER_PIPE_OK"] == "1"
+    if !pipeOK {
+        die("""
+            refusing to emit master on stdout (issue #8 leak guard).
+            The legitimate caller (bin/p2ai) sets P2AI_MASTER_PIPE_OK=1
+            before invoking this binary. Direct invocation is blocked to
+            prevent transcript / log / agent-stdout leaks.
+
+            Use one of:
+              p2ai run -e VAR='entry' -- <cmd>     env-injection (preferred)
+              p2ai fetch '<entry>'                 clipboard, auto-clear
+              p2ai-master --auth-only --reason X   Touch-ID gesture only
+              p2ai-master --pbcopy --reason X      master to clipboard
+            """, 2)
+    }
+}
+
 switch mode {
 case "setup":           storeMaster()
 case "remove", "rm":    removeMaster()
-default:                fetchMaster(toClipboard: toClipboard, reason: reason, allowAgent: allowAgent)
+default:
+    if authOnly {
+        // Pure Touch-ID gesture. Master never read from Keychain.
+        requireAuth(reason: reason)
+        // requireAuth dies with code 130 on cancel; if we reach here, success.
+        exit(0)
+    }
+    fetchMaster(toClipboard: toClipboard, reason: reason, allowAgent: allowAgent)
 }

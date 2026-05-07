@@ -410,6 +410,47 @@ else
   fail "PUTENTRY accepted oversized payload: $cached bytes (sent 2MB, expected ≤1MB)"
 fi
 
+# ----------------------------------------------------------------------------
+section "18. p2ai-master stdout leak guard (issue #8)"
+# ----------------------------------------------------------------------------
+# The Swift binary p2ai-master must refuse to emit master on stdout unless
+# the caller sets P2AI_MASTER_PIPE_OK=1. Direct invocation by AI agents,
+# interactive shells, or arbitrary pipes must be blocked. Tests run against
+# the REAL Swift binary (not the stub) because the guard lives there.
+
+REAL_MASTER_BIN="$REPO/bin/p2ai-master"
+if [[ ! -x "$REAL_MASTER_BIN" ]]; then
+  skip "18a-c: real p2ai-master binary not built — run install.sh"
+else
+  # 18a: direct invocation without env → refuse, master MUST NOT appear
+  out=$("$REAL_MASTER_BIN" --reason "test 18a" 2>&1 </dev/null || true)
+  rc=$?
+  if [[ "$out" == *"refusing to emit master on stdout"* ]] && [[ "$rc" -ne 0 ]]; then
+    pass "18a: direct invocation refused without P2AI_MASTER_PIPE_OK"
+  else
+    fail "18a: direct invocation NOT refused (rc=$rc, output: ${out:0:80})"
+  fi
+
+  # 18b: --auth-only flag is recognized in help (gesture-only path documented)
+  out=$("$REAL_MASTER_BIN" --help 2>&1 || true)
+  if [[ "$out" == *"--auth-only"* ]]; then
+    pass "18b: --auth-only flag documented in help"
+  else
+    fail "18b: --auth-only flag missing from help"
+  fi
+
+  # 18c: PIPE_OK=1 must bypass the guard. Real fetch will fail in unattended
+  # tests (no Touch-ID, no enrolled item under test conditions), but the
+  # specific "refusing to emit" message must NOT appear — that confirms the
+  # guard recognized the legitimate-caller env var.
+  out=$(P2AI_MASTER_PIPE_OK=1 "$REAL_MASTER_BIN" --reason "test 18c" 2>&1 </dev/null || true)
+  if [[ "$out" != *"refusing to emit master"* ]]; then
+    pass "18c: P2AI_MASTER_PIPE_OK=1 bypasses guard (legitimate-caller path)"
+  else
+    fail "18c: PIPE_OK=1 still refused (env var not honored)"
+  fi
+fi
+
 # ---------- summary ----------
 
 "$P2AI" lock >/dev/null 2>&1

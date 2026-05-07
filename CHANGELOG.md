@@ -4,6 +4,35 @@ All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/), major bumps on breaking CLI changes.
 
+## [0.9.4] - 2026-05-07
+
+### SECURITY (issue #8)
+
+- **`p2ai-master` now refuses to emit the master on stdout unless the caller
+  sets `P2AI_MASTER_PIPE_OK=1`.** Direct invocation by AI agents, interactive
+  shells, log pipelines, or any code path that captures stdout is blocked
+  with a clear refusal message. The legitimate caller (`bin/p2ai`'s
+  `fetch_master`) sets the env var before invoking the binary, so all wrapper
+  call sites continue to work; only direct/raw invocation is refused.
+  Discovery: a demo session captured the master into an AI agent's
+  transcript via `p2ai-master --reason "..." | head`. Exit code 2 on refuse.
+- **New `p2ai-master --auth-only` flag.** Calls `LAContext.evaluatePolicy`
+  for a Touch-ID gesture only, never reads the Keychain, never emits the
+  master. Replaces the legacy "fetch master, redirect to /dev/null" pattern
+  used for "user is present" checks (the master still crossed the pipe).
+  `cmd_attachment` now uses `--auth-only` for its leak-warning gesture.
+- **`p2ai unlock --once-per-entry`** now uses `--auth-only` for its initial
+  Touch-ID gesture (master is fetched lazily later anyway, no need to pipe
+  it once just to discard it).
+- **Test 18 added** in `tests/security.sh` covering the new guard,
+  `--auth-only` documentation, and the legitimate-caller `PIPE_OK=1` path.
+
+### Migration
+
+No CLI breaks for end users. Custom scripts that invoke `p2ai-master`
+directly must set `P2AI_MASTER_PIPE_OK=1` before the call (and pipe stdout
+to a non-TTY consumer like `keepassxc-cli`). Better: use `p2ai run -e VAR='entry' -- <cmd>` or `p2ai fetch '<entry>'` instead of going through `p2ai-master`.
+
 ## [0.9.3] - 2026-05-07
 
 ### Added
