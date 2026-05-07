@@ -1,7 +1,7 @@
 # Passwort2AI by Fingerprint 🫆
 
 <p align="center">
-  <img src="docs/demo-v3.svg" alt="p2ai demo: Claude asks for GitHub token, Touch-ID tap, gh repo list runs, token never enters chat" width="640">
+  <img src="docs/demo-v4.svg" alt="p2ai demo: Claude asks for GitHub token, Touch-ID tap, gh repo list runs, token never enters chat" width="640">
 </p>
 
 <p align="center">
