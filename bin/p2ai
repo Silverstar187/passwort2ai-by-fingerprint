@@ -787,7 +787,7 @@ cmd_add() {
     case "$1" in
       -u|--username)  user="${2:?}"; shift 2 ;;
       --url)          url="${2:?}"; shift 2 ;;
-      --notes|--note) notes="${2:?}"; shift 2 ;;
+      --notes)        notes="${2:?}"; shift 2 ;;
       -g|--generate)  gen_len="${2:-24}"
                       [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
                       shift 2 ;;
@@ -888,7 +888,7 @@ cmd_edit() {
     case "$1" in
       -u|--username)  user="${2:?}"; shift 2 ;;
       --url)          url="${2:?}"; shift 2 ;;
-      --notes|--note) notes="${2:?}"; shift 2 ;;
+      --notes)        notes="${2:?}"; shift 2 ;;
       -t|--title)     title="${2:?}"; shift 2 ;;
       -g|--generate)  gen_len="${2:-24}"
                       [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
@@ -1168,7 +1168,7 @@ cmd_fetch() {
       --export|-e)
         die "--export removed (transcript-leak risk in AI-agent shells). Use 'p2ai run -e VAR=\"entry\" -- <cmd>' — the secret enters only the cmd's environment, never the parent shell."
         ;;
-      --attr|-a)    attr="${2:?}"; shift 2 ;;
+      --attr|--attributes|-a)    attr="${2:?}"; shift 2 ;;
       --no-clear|-n) mode="pbcopy-noclear"; shift ;;
       -h|--help)
         cat <<USAGE
