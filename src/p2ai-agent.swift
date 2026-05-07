@@ -2,7 +2,7 @@
 //
 // p2ai-agent — short-lived in-memory secret cache (master + per-entry).
 //
-//   p2ai-agent --mode auto   [--ttl N]   (default)
+//   p2ai-agent --mode auto   [--ttl N]
 //     - Reads master from stdin, holds it + entries in RAM.
 //     - Touch-ID is only required to start the agent; subsequent fetches use
 //       the cached master and (after first hit) the cached entry value.
@@ -11,8 +11,10 @@
 //   p2ai-agent --mode per-entry [--ttl N]
 //     - Does NOT cache the master. New entries always require a fresh
 //       master (Touch-ID); already-fetched entries are cached.
-//     - No idle TTL — only screen-lock or hard cap end the session.
 //     - No stdin needed at startup.
+//
+// --ttl N: idle TTL in seconds. -1 disables idle expiry entirely.
+// Mode-default TTLs are picked by the bin/p2ai wrapper (auto: -1, per-entry: 1800).
 //
 // Protocol (one command per connection, line-terminated):
 //   GET                  → master (or MISS in per-entry mode)
@@ -23,17 +25,16 @@
 //   INVALIDATE <prefix>  → drop all entries with key == prefix or prefix:*
 //                          replies "OK N" (count dropped)
 //   MODE                 → "auto" | "per-entry"
-//   STATUS               → "OK ttl_idle=N ttl_abs=N entries=N pid=N mode=X"
-//                          (ttl_idle=-1 means n/a in per-entry mode)
+//   STATUS               → "OK ttl_idle=N entries=N pid=N mode=X"
+//                          (ttl_idle=-1 means idle TTL disabled / unlimited)
 //   EXIT                 → cleanup + die
 //
-// Auto-locks on idle TTL, hard cap, screen-lock, screensaver, signals.
+// Auto-locks on idle TTL (if > 0), screen-lock, screensaver, signals.
 
 import Foundation
 import Darwin
 
 let DEFAULT_TTL: TimeInterval = 300
-let HARD_LIMIT: TimeInterval = 1800
 
 // Honor P2AI_STATE_DIR for test isolation + custom XDG layouts.
 // Falls back to ~/.local/state/p2ai if unset.
@@ -91,7 +92,8 @@ while i < args.endIndex {
     case "--ttl":
         i = args.index(after: i)
         guard i < args.endIndex, let v = Double(args[i]) else { die("--ttl needs seconds") }
-        idleTtl = min(max(v, 30), HARD_LIMIT)
+        // -1 = unlimited (no idle check). Otherwise clamp to >= 30s.
+        idleTtl = v < 0 ? -1 : max(v, 30)
     case "--mode":
         i = args.index(after: i)
         guard i < args.endIndex, let m = AgentMode.parse(args[i]) else {
@@ -190,18 +192,15 @@ umask(0o077)
 try? "\(getpid())".write(toFile: pidPath, atomically: true, encoding: .utf8)
 
 // ---- Idle timer + hard cap ----
-let started = Date()
 var lastTouch = Date()
 let idleQueue = DispatchQueue(label: "p2ai.idle")
 let idleTimer = DispatchSource.makeTimerSource(queue: idleQueue)
 idleTimer.schedule(deadline: .now() + 1, repeating: 1)
 idleTimer.setEventHandler {
-    let now = Date()
-    // Per-entry mode skips the idle TTL: master is never cached, so the
-    // session-promise "1× Touch-ID per entry" stays intact for the full
-    // hard-cap window. Screen-lock and the hard cap are the real resets.
-    let idleExpired = mode == .auto && now.timeIntervalSince(lastTouch) >= idleTtl
-    if idleExpired || now.timeIntervalSince(started) >= HARD_LIMIT {
+    // Idle TTL is the only time-based reset. -1 disables it entirely; the
+    // session then ends only on screen-lock, screensaver, or `p2ai lock`.
+    // Mode-default TTLs are picked by the CLI (auto: -1, per-entry: 1800).
+    if idleTtl > 0 && Date().timeIntervalSince(lastTouch) >= idleTtl {
         cleanup()
         exit(0)
     }
@@ -319,15 +318,12 @@ acceptQueue.async {
             writeAll(client, "\(mode.rawValue)\n".data(using: .utf8)!)
 
         case "STATUS":
-            let now = Date()
-            // In per-entry mode the idle TTL is disabled (mode docs promise
-            // "1× per entry per session"). Report -1 so clients can render
-            // it as "n/a" instead of a countdown that never triggers.
-            let idleLeft: Int = mode == .auto
-                ? Int(max(0, idleTtl - now.timeIntervalSince(lastTouch)))
+            // ttl_idle: seconds left, or -1 if idle TTL is disabled.
+            // No hard cap anymore — idle TTL + screen-lock are the resets.
+            let idleLeft: Int = idleTtl > 0
+                ? Int(max(0, idleTtl - Date().timeIntervalSince(lastTouch)))
                 : -1
-            let absLeft  = max(0, HARD_LIMIT - now.timeIntervalSince(started))
-            let line = "OK ttl_idle=\(idleLeft) ttl_abs=\(Int(absLeft)) entries=\(cacheCount()) pid=\(getpid()) mode=\(mode.rawValue)\n"
+            let line = "OK ttl_idle=\(idleLeft) entries=\(cacheCount()) pid=\(getpid()) mode=\(mode.rawValue)\n"
             writeAll(client, line.data(using: .utf8)!)
 
         case "EXIT":

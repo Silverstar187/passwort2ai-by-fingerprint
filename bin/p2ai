@@ -51,7 +51,10 @@ set -euo pipefail
 
 P2AI_CLEAR_SECONDS="${P2AI_CLEAR_SECONDS:-30}"
 P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
-P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-300}"
+# P2AI_AGENT_TTL is intentionally NOT defaulted here. cmd_unlock picks a
+# mode-default (auto: -1 = unlimited, per-entry: 1800) when --ttl wasn't
+# passed and this var is unset. Setting it overrides both.
+P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
 P2AI_AGENT_BIN="${P2AI_AGENT_BIN:-$SCRIPT_DIR/p2ai-agent}"
@@ -342,18 +345,41 @@ setup_check_skill() {
 }
 
 cmd_unlock() {
-  local ttl="$P2AI_AGENT_TTL" mode="auto"
+  # Self-documenting flags --yolo and --once-per-entry are the canonical CLI.
+  # --mode auto|per-entry (and 'session' alias) remain for back-compat.
+  # --ttl N overrides the mode-default idle TTL.
+  local mode="auto" ttl="" ttl_explicit=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ttl|-t)  ttl="${2:?}"; shift 2 ;;
-      --mode|-m) mode="${2:?}"; shift 2 ;;
-      auto|session|per-entry) mode="$1"; shift ;;
-      *) die "unknown unlock arg: $1 (try --mode auto|per-entry --ttl SEC)" ;;
+      --yolo)            mode="auto"; shift ;;
+      --once-per-entry)  mode="per-entry"; shift ;;
+      --ttl|-t)          ttl="${2:?}"; ttl_explicit=1; shift 2 ;;
+      --mode|-m)         mode="${2:?}"; shift 2 ;;
+      yolo|auto|session)         mode="auto"; shift ;;
+      once-per-entry|per-entry)  mode="per-entry"; shift ;;
+      *) die "unknown unlock arg: $1 (try --yolo or --once-per-entry, optional --ttl SEC)" ;;
     esac
   done
-  # Accept "session" as a back-compat alias for the renamed "auto" mode.
-  [[ "$mode" == "session" ]] && mode="auto"
+  # Normalize aliases
+  case "$mode" in
+    yolo|session) mode="auto" ;;
+    once-per-entry) mode="per-entry" ;;
+  esac
   case "$mode" in auto|per-entry) ;; *) die "mode must be auto or per-entry" ;; esac
+
+  # Mode-default idle TTL (if user didn't pass --ttl):
+  #   auto/yolo:        -1 (unlimited — only screen-lock or p2ai lock)
+  #   per-entry:        1800 (30 min idle, then re-Touch-ID for any entry)
+  # P2AI_AGENT_TTL env-var overrides if set.
+  if [[ $ttl_explicit -eq 0 ]]; then
+    if [[ -n "${P2AI_AGENT_TTL:-}" ]]; then
+      ttl="$P2AI_AGENT_TTL"
+    elif [[ "$mode" == "auto" ]]; then
+      ttl="-1"
+    else
+      ttl="1800"
+    fi
+  fi
 
   mkdir -p "$P2AI_STATE_DIR"
   chmod 700 "$P2AI_STATE_DIR"
