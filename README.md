@@ -35,7 +35,7 @@ You're a dev with 30+ tokens. Every coding agent (Claude Code, Cursor, Aider, Cl
 <tr><td>2 Seconds to install</td></tr>
 <tr><td>1 Second to paste Password</td></tr>
 <tr><td>AI can't see the password, just gets a closed letter</td></tr>
-<tr><td>three modes: Strict, Per-Entry, Session — pick by trade-off</td></tr>
+<tr><td>three modes: Strict, Per Entry, Auto — pick by trade-off</td></tr>
 <tr><td>never leak again</td></tr>
 <tr><td>never search again</td></tr>
 <tr><td>all in one place, organized</td></tr>
@@ -89,7 +89,7 @@ p2ai setup
 | Touch-ID | every fetch | once per password | once per session |
 | Command | _(default)_ | `p2ai unlock --mode per-entry` | `p2ai unlock` |
 
-Session ends on screen lock, 5 min idle, or `p2ai lock`.
+Session ends on screen lock, hard cap (30 min), or `p2ai lock`. Auto mode also locks after 5 min idle (`P2AI_AGENT_TTL` to override). Per Entry mode keeps the cache for the full session — no idle timer.
 
 ## Daily use
 
@@ -114,10 +114,10 @@ p2ai edit "<entry>" -g                            # rotate password
 p2ai rm "<entry>" [-f]                            # delete
 p2ai mv "<entry>" "Group/Subgroup"                # move
 
-# Session cache (Touch-ID once, fetch many)
-p2ai unlock                                       # 5min idle, 30min hard cap
-p2ai unlock --mode per-entry                      # master never cached
-p2ai status / p2ai lock
+# Modes (Touch-ID once, fetch many)
+p2ai unlock                                       # Auto: master cached, 5min idle
+p2ai unlock --mode per-entry                      # Per Entry: master never cached, no idle timer
+p2ai status / p2ai lock                           # Strict: just `p2ai lock` or never unlock
 ```
 
 > `--print`, `-o FILE` for fetch, and `--export` are absent on purpose. Each was a transcript-leak path. Upgrading from 0.4.x? Replace `eval "$(p2ai fetch X --export V)" && tool` with `p2ai run -e V='X' -- tool`. See [CHANGELOG.md](CHANGELOG.md).
@@ -130,11 +130,13 @@ macOS with Touch-ID (`bioutil -c` shows ≥1 template) and `keepassxc-cli` (auto
 
 ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master lives in the macOS Keychain, released via `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`. The DB stays encrypted on disk.
 
-`p2ai unlock` runs a short-lived agent that caches secrets in process RAM with a 5-min idle TTL and a 30-min hard cap. Unix socket (mode 600 in a mode-700 dir), peer UID checked via `getpeereid()`. Auto-locks on `com.apple.screenIsLocked`, `com.apple.screensaver.didstart`, idle expiry, hard cap, or `p2ai lock`. `rm` / `edit` / `mv` invalidate cached entries.
+`p2ai unlock` runs a short-lived agent that caches secrets in process RAM. Unix socket (mode 600 in a mode-700 dir), peer UID checked via `getpeereid()`. Auto-locks on `com.apple.screenIsLocked`, `com.apple.screensaver.didstart`, hard cap, or `p2ai lock`. `rm` / `edit` / `mv` invalidate cached entries.
 
-Two cache modes:
-- `session` (default). Master plus per-entry values cached. One Touch-ID at unlock, every subsequent fetch is instant.
-- `per-entry`. Master never cached. New entries need a fresh Touch-ID.
+Auto-lock triggers per mode:
+- **Auto** (default). Master + entry values in RAM. Locks on idle (5 min default, override via `P2AI_AGENT_TTL`) or hard cap.
+- **Per Entry**. Master never in RAM, only fetched per new entry via Touch-ID. No idle timer — locks only on screen-lock or hard cap.
+
+Hard cap is currently 30 min (will become configurable via `--abs-ttl` in v0.9.0).
 
 ## Scope
 
