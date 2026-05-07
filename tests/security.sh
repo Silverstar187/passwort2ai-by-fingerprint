@@ -451,6 +451,140 @@ else
   fi
 fi
 
+# ----------------------------------------------------------------------------
+section "19. p2ai list output never contains password values"
+# ----------------------------------------------------------------------------
+# list is metadata-only: entry names + groups, NEVER decrypted password values.
+
+start_agent session
+"$P2AI" add "ListGuard" -u listuser -g 24 >/dev/null 2>&1
+ref_pw=$(printf '%s\n' "$TESTMASTER" | keepassxc-cli show -s -a Password "$TESTDB" "ListGuard" 2>/dev/null)
+list_out=$("$P2AI" list 2>&1)
+if [[ -n "$ref_pw" ]] && printf '%s' "$list_out" | grep -qF "$ref_pw"; then
+  fail "19: password value visible in list output"
+else
+  pass "19: list output contains entry names only, no password values"
+fi
+
+# ----------------------------------------------------------------------------
+section "20. Error paths do not leak master"
+# ----------------------------------------------------------------------------
+# Missing entry, malformed args — error messages must never echo the master.
+
+# 20a: nonexistent entry on `run`
+out=$("$P2AI" run -e X='nonexistent-zzz-entry' -- true 2>&1 || true)
+if printf '%s' "$out" | grep -qF "$TESTMASTER"; then
+  fail "20a: master leaked in 'run nonexistent entry' error path"
+else
+  pass "20a: 'run' missing entry error stays master-free"
+fi
+
+# 20b: nonexistent entry on `fetch`
+out=$("$P2AI" fetch 'nonexistent-zzz-entry' 2>&1 || true)
+if printf '%s' "$out" | grep -qF "$TESTMASTER"; then
+  fail "20b: master leaked in 'fetch nonexistent entry' error path"
+else
+  pass "20b: 'fetch' missing entry error stays master-free"
+fi
+
+# ----------------------------------------------------------------------------
+section "21. p2ai run rejects empty -e values"
+# ----------------------------------------------------------------------------
+# `p2ai run -e VAR=''` would silently inject the empty string as the entry
+# name, which then fails the keepassxc-cli show with no useful diagnostic.
+# Test that empty values either error out cleanly or do not leak master.
+
+out=$("$P2AI" run -e EMPTY='' -- bash -c 'printf "got=%s" "${EMPTY:-NIL}"' 2>&1 || true)
+if printf '%s' "$out" | grep -qF "$TESTMASTER"; then
+  fail "21: master leaked when empty entry name passed to run"
+else
+  pass "21: empty entry name does not leak master"
+fi
+
+# ----------------------------------------------------------------------------
+section "22. system-prompt output contains no secrets"
+# ----------------------------------------------------------------------------
+# `p2ai system-prompt` emits a static markdown template for AI-agent rules.
+# It must not embed any DB content, master, or per-entry data.
+
+for target in generic claude cursor aider cline; do
+  out=$("$P2AI" system-prompt --target "$target" 2>&1 || true)
+  if printf '%s' "$out" | grep -qF "$TESTMASTER"; then
+    fail "22: system-prompt --target $target leaked master"
+    continue
+  fi
+  if printf '%s' "$out" | grep -qiE 'password\s*[:=]\s*[a-zA-Z0-9]{8,}|key\s*[:=]\s*[a-zA-Z0-9]{8,}'; then
+    fail "22: system-prompt --target $target contains a secret-shaped string"
+    continue
+  fi
+  pass "22: system-prompt --target $target is master-free + no secret-shaped lines"
+done
+
+# ----------------------------------------------------------------------------
+section "23. db.path file mode 600"
+# ----------------------------------------------------------------------------
+# The saved DB path file (~/.local/state/p2ai/db.path or $P2AI_STATE_DIR/db.path)
+# must be mode 600 — readable only by the owner.
+
+if [[ -f "$P2AI_STATE_DIR/db.path" ]]; then
+  mode=$(stat -f '%p' "$P2AI_STATE_DIR/db.path" 2>/dev/null)
+  [[ "${mode: -3}" == "600" ]] \
+    && pass "23: db.path is mode 0600 (got $mode)" \
+    || fail "23: db.path mode = $mode (expected ...600)"
+else
+  skip "23: db.path file not present in test (setup not run)"
+fi
+
+# ----------------------------------------------------------------------------
+section "24. attachment -o FILE prints leak warning to stderr"
+# ----------------------------------------------------------------------------
+# Writing a decrypted attachment to disk bypasses the no-disk policy.
+# cmd_attachment must print a clear ⚠️ warning to stderr BEFORE the write.
+# We trigger the path via the stub (master fetch is mocked) and observe stderr
+# up to the kpcli call (which fails harmlessly because no attachment exists).
+
+start_agent session
+"$P2AI" add "AttachGuard" -u au -g 24 >/dev/null 2>&1
+warn_out=$("$P2AI" attachment "AttachGuard" "fake-attachment.json" -o "$TESTDIR/leak-test.json" 2>&1 || true)
+if printf '%s' "$warn_out" | grep -qF "Writing decrypted attachment to disk"; then
+  pass "24: attachment -o FILE prints leak-warning banner to stderr"
+else
+  fail "24: leak-warning banner missing from attachment -o FILE stderr"
+fi
+
+# ----------------------------------------------------------------------------
+section "25. p2ai-master --auth-only never emits master to stdout"
+# ----------------------------------------------------------------------------
+# --auth-only path must NOT call Keychain or print anything secret-shaped.
+# It only triggers LAContext and returns 0/non-0. Without Touch-ID we can't
+# get exit 0, but we can verify no master-shaped output regardless of outcome.
+
+if [[ -x "$REAL_MASTER_BIN" ]]; then
+  # Use a short timeout (1s) via P2AI_AUTH_TIMEOUT-equivalent — but the binary
+  # does not honor an env timeout for --auth-only, it relies on user cancelling
+  # or LAContext timeout. We instead spawn it with stdin closed and a kill
+  # after a short delay, then check captured stdout was empty.
+  #
+  # NOTE: this test will trigger a Touch-ID dialog on a real machine. In CI
+  # without a TTY it will fail evaluatePolicy immediately, which is fine for
+  # the test — we just want to verify stdout stayed empty either way.
+  tmp_out="$TESTDIR/auth-only.out"
+  tmp_err="$TESTDIR/auth-only.err"
+  "$REAL_MASTER_BIN" --auth-only --reason "test 25 auth-only" >"$tmp_out" 2>"$tmp_err" </dev/null &
+  AUTH_PID=$!
+  sleep 0.5
+  kill -TERM "$AUTH_PID" 2>/dev/null || true
+  wait "$AUTH_PID" 2>/dev/null || true
+  size=$(wc -c < "$tmp_out" | tr -d ' ')
+  if [[ "$size" -eq 0 ]]; then
+    pass "25: --auth-only stdout stayed empty (size=0)"
+  else
+    fail "25: --auth-only emitted $size bytes on stdout"
+  fi
+else
+  skip "25: real p2ai-master not available"
+fi
+
 # ---------- summary ----------
 
 "$P2AI" lock >/dev/null 2>&1
