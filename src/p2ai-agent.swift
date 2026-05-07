@@ -189,8 +189,11 @@ let idleTimer = DispatchSource.makeTimerSource(queue: idleQueue)
 idleTimer.schedule(deadline: .now() + 1, repeating: 1)
 idleTimer.setEventHandler {
     let now = Date()
-    if now.timeIntervalSince(lastTouch) >= idleTtl ||
-       now.timeIntervalSince(started)   >= HARD_LIMIT {
+    // Per-entry mode skips the idle TTL: master is never cached, so the
+    // session-promise "1× Touch-ID per entry" stays intact for the full
+    // hard-cap window. Screen-lock and the hard cap are the real resets.
+    let idleExpired = mode == .session && now.timeIntervalSince(lastTouch) >= idleTtl
+    if idleExpired || now.timeIntervalSince(started) >= HARD_LIMIT {
         cleanup()
         exit(0)
     }
@@ -309,9 +312,14 @@ acceptQueue.async {
 
         case "STATUS":
             let now = Date()
-            let idleLeft = max(0, idleTtl - now.timeIntervalSince(lastTouch))
+            // In per-entry mode the idle TTL is disabled (mode docs promise
+            // "1× per entry per session"). Report -1 so clients can render
+            // it as "n/a" instead of a countdown that never triggers.
+            let idleLeft: Int = mode == .session
+                ? Int(max(0, idleTtl - now.timeIntervalSince(lastTouch)))
+                : -1
             let absLeft  = max(0, HARD_LIMIT - now.timeIntervalSince(started))
-            let line = "OK ttl_idle=\(Int(idleLeft)) ttl_abs=\(Int(absLeft)) entries=\(cacheCount()) pid=\(getpid()) mode=\(mode.rawValue)\n"
+            let line = "OK ttl_idle=\(idleLeft) ttl_abs=\(Int(absLeft)) entries=\(cacheCount()) pid=\(getpid()) mode=\(mode.rawValue)\n"
             writeAll(client, line.data(using: .utf8)!)
 
         case "EXIT":
