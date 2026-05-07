@@ -28,6 +28,8 @@
 #   p2ai status                             agent state + idle remaining
 #   p2ai config                             show config + db path
 #   p2ai install-skill                      symlink SKILL.md into ~/.claude/skills/passwort2ai/
+#   p2ai update [--check] [-y]              check GitHub for newer release, prompt + run upgrade
+#   p2ai --version | -V                     print version
 #   p2ai -h                                 help
 #
 # IMPORTANT: --print, -o FILE, and --export are removed from fetch/otp/gtoken/
@@ -57,6 +59,8 @@ P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
 # passed and this var is unset. Setting it overrides both.
 P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+P2AI_VERSION="0.9.3"
+P2AI_REPO_API="https://api.github.com/repos/Silverstar187/passwort2ai-by-fingerprint"
 P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
 P2AI_AGENT_BIN="${P2AI_AGENT_BIN:-$SCRIPT_DIR/p2ai-agent}"
 P2AI_STATE_DIR="${P2AI_STATE_DIR:-$HOME/.local/state/p2ai}"
@@ -1282,6 +1286,110 @@ cmd_install_skill() {
   printf 'p2ai: skill installed → %s -> %s\n' "$dest" "$skill_md" >&2
 }
 
+cmd_update() {
+  local check_only=0 yes=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --check)        check_only=1; shift ;;
+      -y|--yes)       yes=1; shift ;;
+      -h|--help)
+        cat <<USAGE
+p2ai update [--check] [-y|--yes]
+  Check GitHub for a newer release. Prompts [Y/n] to run the appropriate
+  upgrade command for your install method (brew / source).
+
+  Options:
+    --check    print current vs latest, exit 0 if up-to-date else 1
+    -y         skip the [Y/n] prompt and update immediately
+USAGE
+        return 0 ;;
+      *) die "unknown update flag: $1" ;;
+    esac
+  done
+
+  command -v curl >/dev/null 2>&1 || die "curl required for update check"
+
+  printf '\n  p2ai update\n' >&2
+  printf '  ══════════════════════════════════════════════════════════════\n' >&2
+  printf '  Current: %s\n' "$P2AI_VERSION" >&2
+
+  local latest_tag latest
+  latest_tag="$(curl -fsSL --max-time 8 "$P2AI_REPO_API/releases/latest" 2>/dev/null \
+    | grep -m1 -oE '"tag_name": ?"v?[0-9.]+"' \
+    | cut -d'"' -f4)" || true
+  if [[ -z "$latest_tag" ]]; then
+    printf '  ✗ Could not reach GitHub (network or rate limit).\n\n' >&2
+    return 2
+  fi
+  latest="${latest_tag#v}"
+  printf '  Latest:  %s\n' "$latest" >&2
+
+  if [[ "$P2AI_VERSION" == "$latest" ]]; then
+    printf '  ✓ Up-to-date.\n\n' >&2
+    return 0
+  fi
+
+  # Detect "ahead of latest" (dev build)
+  local highest
+  highest="$(printf '%s\n%s\n' "$P2AI_VERSION" "$latest" | sort -V | tail -1)"
+  if [[ "$highest" == "$P2AI_VERSION" ]]; then
+    printf '  ✓ You are ahead of the latest release (dev build).\n\n' >&2
+    return 0
+  fi
+
+  printf '\n  Update %s → %s available.\n' "$P2AI_VERSION" "$latest" >&2
+  printf '  Release notes: https://github.com/Silverstar187/passwort2ai-by-fingerprint/releases/tag/%s\n' "$latest_tag" >&2
+
+  [[ "$check_only" -eq 1 ]] && { printf '\n' >&2; return 1; }
+
+  # Detect install method by looking at where this binary lives.
+  local self; self="$(self_realpath)"
+  local method="" target_cmd=""
+  if command -v brew >/dev/null 2>&1; then
+    local brew_prefix; brew_prefix="$(brew --prefix passwort2ai 2>/dev/null || true)"
+    if [[ -n "$brew_prefix" && "$self" == "$brew_prefix"/* ]]; then
+      method="brew"
+      target_cmd='brew upgrade silverstar187/p2ai/passwort2ai'
+    fi
+  fi
+  if [[ -z "$method" ]]; then
+    local self_dir; self_dir="$(dirname "$self")"
+    local repo_dir
+    if repo_dir="$(cd "$self_dir/.." 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"; then
+      method="source"
+      target_cmd="cd '$repo_dir' && git pull --ff-only && ./install.sh"
+    fi
+  fi
+
+  if [[ -z "$method" ]]; then
+    printf '\n  ⚠ Could not detect install method (binary at %s).\n' "$self" >&2
+    printf '    Update manually:\n' >&2
+    printf '      brew upgrade silverstar187/p2ai/passwort2ai\n' >&2
+    printf '    or re-run install.sh from the repo.\n\n' >&2
+    return 1
+  fi
+
+  printf '\n  Install method: %s\n' "$method" >&2
+  printf '  Will run:       %s\n\n' "$target_cmd" >&2
+
+  if [[ "$yes" -ne 1 ]]; then
+    printf '  Update now? [Y/n] ' >&2
+    local ans; read -r ans </dev/tty || ans=""
+    case "${ans:-y}" in
+      [Yy]*) ;;
+      *) printf '  Skipped. Update later: p2ai update\n\n' >&2; return 0 ;;
+    esac
+  fi
+
+  printf '\n' >&2
+  if [[ "$method" == "brew" ]]; then
+    brew upgrade silverstar187/p2ai/passwort2ai
+  else
+    bash -c "$target_cmd"
+  fi
+  printf '\n  ✓ Update complete. Run `p2ai --version` to verify.\n\n' >&2
+}
+
 main() {
   local cmd="${1:-}"; [[ $# -gt 0 ]] && shift || true
   case "$cmd" in
@@ -1290,7 +1398,7 @@ main() {
     fetch|f|get)            cmd_fetch "$@" ;;
     add|new)                cmd_add "$@" ;;
     rm|remove|del|delete)   cmd_rm "$@" ;;
-    edit|update)            cmd_edit "$@" ;;
+    edit)                   cmd_edit "$@" ;;
     mv|move|rename)         cmd_mv "$@" ;;
     otp|totp|2fa)           cmd_otp "$@" ;;
     attachment|attach|att)  cmd_attachment "$@" ;;
@@ -1302,6 +1410,8 @@ main() {
     status|s)         cmd_status "$@" ;;
     config|cfg)       cmd_config ;;
     install-skill)    cmd_install_skill "$@" ;;
+    update|upgrade)   cmd_update "$@" ;;
+    -V|--version|version) printf 'p2ai %s\n' "$P2AI_VERSION" ;;
     -h|--help|help|"")
       sed -n '5,32p' "$0" | sed 's/^# \{0,1\}//'
       ;;

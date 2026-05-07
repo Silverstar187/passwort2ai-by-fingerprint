@@ -4,6 +4,28 @@ All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/), major bumps on breaking CLI changes.
 
+## [0.9.3] - 2026-05-07
+
+### Added
+
+- **`p2ai update [--check] [-y]`** — checks GitHub releases for a newer
+  version, prints current vs latest, and prompts `[Y/n]` (setup-style,
+  reads from `/dev/tty`) to run the right upgrade command for your install
+  method:
+  - **brew install** → `brew upgrade silverstar187/p2ai/passwort2ai`
+  - **source install** → `git pull --ff-only && ./install.sh`
+  - **manual** → prints upgrade hint
+  Detects "ahead of latest" (dev build) and skips. `--check` exits 1 if an
+  update is available, 0 if up-to-date.
+- **`p2ai --version` / `-V`** — print the embedded version.
+- Internal `P2AI_VERSION` constant + `P2AI_REPO_API` for release lookups.
+
+### Changed
+
+- `p2ai update` now refers to the version-update command. The legacy
+  `update` alias on `p2ai edit` is removed (`p2ai edit` is the canonical
+  form for entry edits).
+
 ## [0.6.0] - 2026-05-07
 
 ### Added
