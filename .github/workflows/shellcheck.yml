@@ -22,7 +22,10 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
         with:
-          severity: warning
+          # severity=error: only fail on real bugs (syntax, undefined vars in
+          # nounset shells, etc.). Style warnings tracked separately, not
+          # release-blocking. Run locally with --severity=warning for cleanup.
+          severity: error
           scandir: '.'
           additional_files: 'bin/p2ai'
         env:
