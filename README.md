@@ -138,6 +138,8 @@ ssh-agent for KeePass, gated by Touch-ID. Wraps `keepassxc-cli`. Master lives in
 
 p2ai sits between your KeePass DB and the AI tools you use day-to-day. It eliminates one anti-pattern (pasting secrets in chat). It is not a KeePass replacement, not new crypto, not host hardening. Trust model matches `ssh-agent`: a compromised host or same-user process can read agent RAM, clipboard, or env-vars. For tighter isolation use `--once-per-entry` or `p2ai lock` after each session.
 
+> **When does p2ai actually help vs just using `security`?** See the [feature comparison + roadmap gist](https://gist.github.com/Silverstar187/b7eeb1dcb196cd4abc2b2aea82b22da0) — every row marks whether p2ai supports it today, plans to, or considers it out of scope.
+
 ### ⚠️ Caveat: `lock` only protects what lives in the kdbx
 
 `p2ai lock` revokes the agent's RAM cache. It does **not** revoke credentials your machine stores elsewhere — git's `osxkeychain` helper, your shell's exported `*_API_KEY` vars, `.env` / `.netrc` / `~/.npmrc` files, ssh-agent, browser-saved tokens. Those keep working after `p2ai lock` because p2ai never owned them.
