@@ -43,7 +43,7 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Silverstar187/homebrew-p2ai
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
