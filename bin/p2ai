@@ -84,9 +84,9 @@ p2ai_reason() {
   local key="$1" arg="${2:-}" lang
   lang=$(p2ai_lang)
   case "$key:$lang" in
-    unlock:de)  printf 'Master für Session entsperren' ;;
-    unlock:fr)  printf 'Déverrouiller le master pour la session' ;;
-    unlock:*)   printf 'Unlock master for session' ;;
+    unlock:de)  printf '⚠️ Master für Session entsperren' ;;
+    unlock:fr)  printf '⚠️ Déverrouiller le master pour la session' ;;
+    unlock:*)   printf '⚠️ Unlock master for session' ;;
     fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
     fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
     fetch:*)    printf 'Fetch "%s"' "$arg" ;;

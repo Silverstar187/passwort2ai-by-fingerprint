@@ -176,11 +176,17 @@ func pbcopy(_ s: String) {
 }
 
 func fetchMaster(toClipboard: Bool, reason: String, allowAgent: Bool) {
-    // Agent fast-path
-    if allowAgent, let pw = tryAgentFetch(), !pw.isEmpty {
-        if toClipboard { pbcopy(pw); FileHandle.standardError.write("Master in clipboard (agent).\n".data(using: .utf8)!) }
-        else { print(pw) }
-        return
+    // Agent fast-path. tryAgentFetch returns "MISS\n" in per-entry mode (master
+    // not cached) — must NOT pass that through as the master, or keepassxc-cli
+    // gets "MISS" as the password and fails with "invalid credentials".
+    if allowAgent, let raw = tryAgentFetch() {
+        let pw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pw.isEmpty && pw != "MISS" {
+            if toClipboard { pbcopy(pw); FileHandle.standardError.write("Master in clipboard (agent).\n".data(using: .utf8)!) }
+            else { print(pw) }
+            return
+        }
+        // Fall through to Keychain + Touch-ID
     }
 
     let probe: [String: Any] = [
