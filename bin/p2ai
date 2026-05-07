@@ -748,7 +748,33 @@ USAGE
   [[ -n "$entry" ]] || die "usage: p2ai attachment <entry> [<name>] [-o FILE | --pbcopy]"
   require_db
   local kpcli; kpcli=$(resolve_kpcli)
-  local master; master=$(fetch_master "$(p2ai_reason attachment "$entry")") || die "auth failed"
+
+  # Default for named attachment fetch: pbcopy (text only, never blind stdout)
+  [[ -n "$name" && -z "$mode" ]] && mode="pbcopy"
+
+  # Disk-write leak warning, must run BEFORE fetch_master so the Touch-ID prompt
+  # in Strict mode shows the leak-aware reason. Per Entry: explicit extra
+  # Touch-ID gesture (master cached otherwise). YOLO: notification only.
+  local fetch_reason
+  fetch_reason="$(p2ai_reason attachment "$entry")"
+  if [[ "$mode" == "file" && -n "$name" ]]; then
+    printf '\n  ⚠️  Writing decrypted attachment to disk:\n' >&2
+    printf '       %s\n' "$outfile" >&2
+    printf '     This bypasses p2ai'"'"'s no-disk policy. The file is your\n' >&2
+    printf '     responsibility (Spotlight, iCloud, backups, other processes).\n\n' >&2
+
+    osascript -e "display notification \"${outfile//\"/\\\"}\" with title \"⚠️ p2ai: attachment saved to disk\" sound name \"Tink\"" 2>/dev/null || true
+
+    local cur_mode; cur_mode="$(agent_mode 2>/dev/null || true)"
+    if [[ "$cur_mode" == "per-entry" ]]; then
+      "$P2AI_MASTER_BIN" --reason "Save attachment '$name' to disk (leak risk)" >/dev/null \
+        || die "cancelled — no file written"
+    fi
+    # In Strict mode, fetch_master below triggers Touch-ID with leak-aware reason
+    fetch_reason="Save attachment '$name' to disk (leak risk)"
+  fi
+
+  local master; master=$(fetch_master "$fetch_reason") || die "auth failed"
 
   if [[ -z "$name" ]]; then
     # List attachments
@@ -757,9 +783,6 @@ USAGE
     master=""
     return 0
   fi
-
-  # Default for named attachment fetch: pbcopy (text only, never blind stdout)
-  [[ -z "$mode" ]] && mode="pbcopy"
 
   if [[ "$mode" == "file" ]]; then
     printf '%s\n' "$master" | "$kpcli" attachment-export "$P2AI_DB" "$entry" "$name" "$outfile" 2>&1 | tail -1
