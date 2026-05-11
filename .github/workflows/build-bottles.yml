@@ -46,12 +46,26 @@ jobs:
         id: tag
         run: |
           if [[ -n "${{ inputs.tag }}" ]]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            TAG="${{ inputs.tag }}"
           else
-            # workflow_run doesn't expose the triggering ref directly; read from API
-            TAG=$(gh release list -R "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            # Triggered via workflow_run after "Bump Homebrew formula". For a tag
+            # push, that upstream run's head_branch IS the tag name (e.g. v0.9.5),
+            # so use it directly. `gh release list --limit 1` raced with the
+            # maintainer creating the GitHub release and attached bottles to the
+            # previous release (see #14 fallout).
+            TAG="${{ github.event.workflow_run.head_branch }}"
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              # Upstream wasn't a tag push (e.g. it was workflow_dispatch) —
+              # fall back to the most recent release.
+              TAG=$(gh release list -R "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')
+            fi
           fi
+          if [[ -z "$TAG" ]]; then
+            echo "::error::could not resolve a tag to bottle"
+            exit 1
+          fi
+          echo "Resolved tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -76,7 +90,15 @@ jobs:
 
       - name: Upload bottle to GitHub release
         run: |
-          gh release upload "${{ steps.tag.outputs.tag }}" \
+          TAG="${{ steps.tag.outputs.tag }}"
+          # Self-heal: if the release doesn't exist yet, create a minimal one so
+          # the upload can't silently no-op or fail. The maintainer can flesh out
+          # the notes afterwards.
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" \
             "${{ steps.bottle.outputs.file }}" \
             --repo "${{ github.repository }}" \
             --clobber
@@ -102,11 +124,19 @@ jobs:
         id: tag
         run: |
           if [[ -n "${{ inputs.tag }}" ]]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            TAG="${{ inputs.tag }}"
           else
-            TAG=$(gh release list -R "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            TAG="${{ github.event.workflow_run.head_branch }}"
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              TAG=$(gh release list -R "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')
+            fi
           fi
+          if [[ -z "$TAG" ]]; then
+            echo "::error::could not resolve a tag to bottle"
+            exit 1
+          fi
+          echo "Resolved tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
