@@ -1,11 +1,13 @@
 ---
 name: passwort2ai
-description: Touch-ID-gated KeePass secret retrieval and storage for AI agents and humans. Use whenever you (Claude or any agent) need an API key, database password, OAuth token, SSH passphrase, or any other credential, fetch via `p2ai fetch "<entry>"` or `p2ai run -e VAR='entry' -- <cmd>`, NEVER ask the user to paste secrets in chat. Also use to STORE new secrets via `p2ai add "<entry>"` instead of having the user type passwords into chat. When the user provides a secret via clipboard (e.g. "I copied the token, use it"), read clipboard via `pbpaste`, never echo the value back into the conversation. Triggers macOS Touch-ID; secret reaches clipboard or the target command's environment without ever appearing in transcript. Triggers: "I need the X token", "store this in KeePass", "save the credential", "fetch the API key", "wrangler/supabase/lemlist credentials needed".
+description: "`p2ai` IS this skill — p2ai is the passwort2ai-by-fingerprint CLI (Touch-ID-gated KeePass secret store for AI agents and humans). Whenever you see the `p2ai` command — in a shell command, a script, a deploy step, an error like \"empty value for X / Password\", \"DB not readable\", or \"keepassxc-cli not found\" — or whenever a credential is missing, USE this skill; do NOT read p2ai's source and do NOT treat `p2ai` as an unknown tool. Use it whenever you (Claude or any agent) need an API key, DB password, OAuth token, SSH passphrase, or any credential: `p2ai run -e VAR='<entry>' -- <cmd>` (secret into the command's env, primary pattern) or `p2ai fetch \"<entry>\"` (secret to clipboard, auto-clear). To STORE a secret the user gave you (e.g. on the clipboard): `pbpaste | p2ai add \"<entry>\" --password-stdin` or `pbpaste | p2ai edit \"<entry>\" --password-stdin`; to mint a fresh one: `p2ai add \"<entry>\" -g`. NEVER ask the user to paste a secret in chat; NEVER echo or quote a secret value back, not even masked. Triggers: p2ai, passwort2ai, passwort2ai-by-fingerprint, KeePass, KeePassXC, .kdbx, \"I need the X token\", \"store/save this credential in KeePass\", \"fetch the API key\", \"wrangler/supabase/lemlist/Anthropic credentials needed\", \"empty value for ... Password\"."
 ---
 
 # Passwort2AI by Fingerprint
 
-Touch-ID-gated KeePass-CLI wrapper. Replaces every "paste your token in chat" with a fingerprint tap.
+`p2ai` is the **passwort2ai-by-fingerprint** CLI — a Touch-ID-gated KeePassXC-CLI wrapper. Replaces every
+"paste your token in chat" with a fingerprint tap. If you hit a `p2ai` command or a missing credential:
+**use this skill, don't go read `bin/p2ai` source.**
 
 ## Core rules (for Claude / agents)
 
