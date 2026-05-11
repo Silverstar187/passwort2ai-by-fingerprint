@@ -4,6 +4,18 @@ All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/), major bumps on breaking CLI changes.
 
+## [0.9.6] - 2026-05-11
+
+### Fixed
+
+- **`p2ai run` Touch-ID prompt now names the entries being fetched.** It used to
+  read `Fetch "run"` (the literal word `run` was passed where the entry name
+  goes), which told the user nothing about what they were approving. The prompt
+  now reads `Fetch "GitHub Token"` for a single secret, or
+  `Fetch secrets: GitHub Token, AWS Prod, …` (first 5, then `(+N more)`) for
+  several — built from the actual `-e VAR=entry` mappings, deduped. German /
+  French wording handled like the other reasons.
+
 ## [0.9.5] - 2026-05-11
 
 ### Fixed

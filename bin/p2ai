@@ -61,7 +61,7 @@ P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
 # passed and this var is unset. Setting it overrides both.
 P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-P2AI_VERSION="0.9.5"
+P2AI_VERSION="0.9.6"
 P2AI_REPO_API="https://api.github.com/repos/Silverstar187/passwort2ai-by-fingerprint"
 P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
 P2AI_AGENT_BIN="${P2AI_AGENT_BIN:-$SCRIPT_DIR/p2ai-agent}"
@@ -126,6 +126,11 @@ p2ai_reason() {
     fetch:de)   printf 'Eintrag "%s" abrufen' "$arg" ;;
     fetch:fr)   printf "Récupérer l'entrée \"%s\"" "$arg" ;;
     fetch:*)    printf 'Fetch "%s"' "$arg" ;;
+    # `p2ai run` with several -e mappings — name the entries so the prompt is
+    # decision-relevant. (Single entry uses the `fetch` reason above.)
+    run:de)     printf 'Secrets abrufen: %s' "$arg" ;;
+    run:fr)     printf 'Récupérer les secrets : %s' "$arg" ;;
+    run:*)      printf 'Fetch secrets: %s' "$arg" ;;
     add:de)     printf 'Eintrag "%s" hinzufügen' "$arg" ;;
     add:fr)     printf 'Ajouter l\047entrée "%s"' "$arg" ;;
     add:*)      printf 'Add "%s"' "$arg" ;;
@@ -1208,6 +1213,35 @@ USAGE
   # In per-entry mode this means cache-only runs are silent and instant.
   local master=""
 
+  # Build a Touch-ID reason that names the entries about to be read, so the
+  # macOS prompt is decision-relevant ("Fetch secrets: GitHub Token, AWS Prod")
+  # instead of the old useless 'Fetch "run"'.
+  local -a _entries=()
+  local _p _r _e _x _dup
+  for _p in "${env_pairs[@]}"; do
+    _r="${_p#*=}"
+    if [[ "$_r" == *::* ]]; then _e="${_r%::*}"; else _e="$_r"; fi
+    _dup=0
+    if [[ ${#_entries[@]} -gt 0 ]]; then
+      for _x in "${_entries[@]}"; do [[ "$_x" == "$_e" ]] && _dup=1; done
+    fi
+    [[ $_dup -eq 0 ]] && _entries+=("$_e")
+  done
+  local run_reason
+  if [[ ${#_entries[@]} -eq 1 ]]; then
+    run_reason=$(p2ai_reason fetch "${_entries[0]}")
+  else
+    local _list="" _i=0
+    for _x in "${_entries[@]}"; do
+      [[ $_i -ge 5 ]] && break
+      [[ -n "$_list" ]] && _list+=", "
+      _list+="$_x"
+      _i=$((_i + 1))
+    done
+    [[ ${#_entries[@]} -gt 5 ]] && _list+=" (+$(( ${#_entries[@]} - 5 )) more)"
+    run_reason=$(p2ai_reason run "$_list")
+  fi
+
   # Fetch every requested secret. Cache via agent if running.
   local -a env_kv=()
   local pair var rest entry attr secret cached
@@ -1232,7 +1266,7 @@ USAGE
     if [[ -z "$secret" ]]; then
       # First cache miss → fetch master once, reuse for any further misses
       if [[ -z "$master" ]]; then
-        master=$(fetch_master "$(p2ai_reason fetch run)") || die "auth failed"
+        master=$(fetch_master "$run_reason") || die "auth failed"
       fi
       secret=$(printf '%s' "$master" | "$kpcli" show -s -a "$attr" "$P2AI_DB" "$entry" 2>/dev/null) \
         || die "entry not found: $entry"
