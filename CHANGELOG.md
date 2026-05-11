@@ -4,6 +4,46 @@ All notable changes to Passwort2AI by Fingerprint.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/), major bumps on breaking CLI changes.
 
+## [0.9.5] - 2026-05-11
+
+### Fixed
+
+- **`p2ai add` / `p2ai edit` could silently store an EMPTY password.** The
+  wrapper always piped only the master to `keepassxc-cli`, which reads *both*
+  the DB master (stdin line 1) and the `-p` entry password (stdin line 2) from
+  stdin — so the entry password read always hit EOF and the entry was created
+  with an empty value, while the command still exited 0 and printed
+  "Successfully added". This affected `-p` even from an interactive terminal,
+  and meant there was **no working way for an AI agent (no TTY) to write a
+  secret into the .kdbx**, despite SKILL.md documenting that flow. The wrapper
+  now acquires the entry password itself and feeds `keepassxc-cli` both lines.
+- **`P2AI_DB` default no longer points only at `~/passwords.kdbx`.** If `p2ai
+  setup` never recorded a path, the resolver now probes a short list of common
+  database names in `$HOME` / `$HOME/Documents` — including the non-ASCII
+  `Passwörter.kdbx` — and persists the first hit to `db.path` so later calls
+  (and `p2ai config`) are consistent without a `$P2AI_DB` override on every
+  invocation. `p2ai setup` now also records the path when adopting an existing
+  database, not just when creating a new one.
+
+### Added
+
+- **`p2ai add <entry> --password-stdin` and `p2ai edit <entry> --password-stdin`.**
+  Reads the entry password from line 1 of stdin and never lets it touch argv,
+  stdout, or disk — the agent-safe way to store a value the user already has:
+  `pbpaste | p2ai add "API Token" --password-stdin`. Mutually exclusive with
+  `-g`.
+- **`-p` now refuses a non-TTY stdin** instead of silently writing an empty
+  password — it prints an error pointing at `--password-stdin`. `-p` from a
+  real terminal now actually prompts for and stores the password (it was
+  previously broken too, see Fixed above).
+- **`p2ai config`** now reports where the resolved DB path came from
+  (`$P2AI_DB` env / saved setup / probed-or-default) and prints the contents
+  of the `db.path` state file.
+- `tests/security.sh`: new sections 26–27 covering the empty-password guard,
+  `--password-stdin` round-trips for `add`/`edit`, the empty-stdin and
+  `-g`+`--password-stdin` rejections, and that the supplied password never
+  appears in command output.
+
 ## [0.9.4] - 2026-05-07
 
 ### SECURITY (issue #8)

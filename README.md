@@ -110,7 +110,10 @@ p2ai attachment "<entry>" file.json -o out.json   # binary attachment
 
 # Write
 p2ai add "<entry>" -u USER                        # auto-generates 24-char password
-p2ai edit "<entry>" -g                            # rotate password
+p2ai add "<entry>" -u USER -p                     # prompt for the password on the terminal
+pbpaste | p2ai add "<entry>" --password-stdin     # store a value you already have (no TTY needed)
+p2ai edit "<entry>" -g                            # rotate password (fresh random)
+pbpaste | p2ai edit "<entry>" --password-stdin    # rotate to a value you already have
 p2ai rm "<entry>" [-f]                            # delete
 p2ai mv "<entry>" "Group/Subgroup"                # move
 

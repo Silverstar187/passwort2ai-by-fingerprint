@@ -586,6 +586,66 @@ else
   skip "25: real p2ai-master not available"
 fi
 
+# ----------------------------------------------------------------------------
+section "26. add/edit never silently store an empty password"
+# ----------------------------------------------------------------------------
+# Regression guard for the data-loss trap: `p2ai add X -p` with a non-TTY stdin
+# used to exit 0 + "Successfully added" while writing an EMPTY password. It must
+# now fail loud, and --password-stdin must actually persist the piped value.
+
+start_agent session
+
+# 26a: -p with non-TTY stdin → must fail, must NOT create the entry
+out=$(printf 'this-line-must-be-ignored\n' | "$P2AI" add "EmptyTrap" -p 2>&1); rc=$?
+if [[ $rc -ne 0 ]] && ! printf '%s\n' "$TESTMASTER" | keepassxc-cli show "$TESTDB" "EmptyTrap" >/dev/null 2>&1; then
+  pass "26a: 'add -p' on non-TTY stdin fails and creates nothing (rc=$rc)"
+else
+  fail "26a: 'add -p' on non-TTY stdin rc=$rc — entry may have been created with empty pw"
+fi
+
+# 26b: --password-stdin persists the piped secret verbatim
+secret="s3cr3t-piped-$$-value"
+printf '%s\n' "$secret" | "$P2AI" add "PipedEntry" --url "https://x" --password-stdin >/dev/null 2>&1
+got=$(printf '%s\n' "$TESTMASTER" | keepassxc-cli show -s -a Password "$TESTDB" "PipedEntry" 2>/dev/null)
+if [[ "$got" == "$secret" ]]; then
+  pass "26b: '--password-stdin' stored the piped password verbatim"
+else
+  fail "26b: '--password-stdin' stored '${got:0:4}…' (len ${#got}) — expected len ${#secret}"
+fi
+
+# 26c: empty stdin → must fail
+if printf '' | "$P2AI" add "EmptyStdin" --password-stdin >/dev/null 2>&1; then
+  fail "26c: '--password-stdin' with empty stdin succeeded (should fail)"
+else
+  pass "26c: '--password-stdin' with empty stdin fails loud"
+fi
+
+# 26d: edit --password-stdin rotates to the piped value
+new="rotated-$$-value"
+printf '%s\n' "$new" | "$P2AI" edit "PipedEntry" --password-stdin >/dev/null 2>&1
+got=$(printf '%s\n' "$TESTMASTER" | keepassxc-cli show -s -a Password "$TESTDB" "PipedEntry" 2>/dev/null)
+[[ "$got" == "$new" ]] && pass "26d: 'edit --password-stdin' rotated to the piped value" \
+                       || fail "26d: 'edit --password-stdin' got len ${#got}, expected len ${#new}"
+
+# 26e: -g and --password-stdin are mutually exclusive
+if printf 'x\n' | "$P2AI" add "BothFlags" -g --password-stdin >/dev/null 2>&1; then
+  fail "26e: 'add -g --password-stdin' succeeded (should reject the combination)"
+else
+  pass "26e: 'add -g --password-stdin' rejected as a conflict"
+fi
+
+# ----------------------------------------------------------------------------
+section "27. --password-stdin value never reaches stdout/stderr"
+# ----------------------------------------------------------------------------
+# The piped password must enter only the .kdbx, never the captured output.
+sentinel="leak-canary-$$-deadbeef"
+all_out=$(printf '%s\n' "$sentinel" | "$P2AI" add "LeakCheck" --password-stdin 2>&1)
+if printf '%s' "$all_out" | grep -qF "$sentinel"; then
+  fail "27: --password-stdin echoed the password into add output"
+else
+  pass "27: --password-stdin add output is free of the supplied password"
+fi
+
 # ---------- summary ----------
 
 "$P2AI" lock >/dev/null 2>&1

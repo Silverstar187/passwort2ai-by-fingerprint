@@ -14,9 +14,10 @@
 #   p2ai fetch <entry>                      Touch-ID, password → pbcopy + auto-clear 30s
 #   p2ai fetch <entry> --attr UserName      different attribute (default: Password)
 #   p2ai add <entry> [-u USER] [-g [LEN]]   add new entry; -g auto-generates pw (default 24c)
-#   p2ai add <entry> -p                     add entry with interactive password prompt
+#   p2ai add <entry> -p                     add entry, prompt for password on the terminal
+#   p2ai add <entry> --password-stdin       add entry, read password as line 1 of stdin (for AI agents)
 #   p2ai add <entry> --url URL --notes TXT  add with URL + notes fields
-#   p2ai edit <entry> [opts]                update fields (-u/--url/--notes/-t/-g/-p)
+#   p2ai edit <entry> [opts]                update fields (-u/--url/--notes/-t/-g/-p/--password-stdin)
 #   p2ai rm <entry> [-f]                    delete entry (confirm unless -f)
 #   p2ai mv <entry> <group>                 move entry to another group
 #   p2ai otp <entry>                        TOTP → pbcopy + auto-clear (or --export VAR)
@@ -45,7 +46,8 @@
 #   130 SIGINT — user cancelled Touch-ID prompt
 #
 # Config:
-#   $P2AI_DB                                .kdbx path (default ~/passwords.kdbx)
+#   $P2AI_DB                                .kdbx path (default: saved setup path, else
+#                                           first readable of ~/passwords.kdbx, ~/Passwörter.kdbx, …)
 #   $P2AI_KEEPASSXC_CLI                     keepassxc-cli binary (default: auto-detect)
 #   $P2AI_CLEAR_SECONDS                     pbcopy auto-clear delay (default 30)
 #   $P2AI_AGENT_TTL                         agent idle TTL seconds (default 300)
@@ -59,7 +61,7 @@ P2AI_KEEPASSXC_CLI="${P2AI_KEEPASSXC_CLI:-}"
 # passed and this var is unset. Setting it overrides both.
 P2AI_AGENT_TTL="${P2AI_AGENT_TTL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-P2AI_VERSION="0.9.4"
+P2AI_VERSION="0.9.5"
 P2AI_REPO_API="https://api.github.com/repos/Silverstar187/passwort2ai-by-fingerprint"
 P2AI_MASTER_BIN="${P2AI_MASTER_BIN:-$SCRIPT_DIR/p2ai-master}"
 P2AI_AGENT_BIN="${P2AI_AGENT_BIN:-$SCRIPT_DIR/p2ai-agent}"
@@ -68,9 +70,29 @@ P2AI_SOCK="$P2AI_STATE_DIR/agent.sock"
 P2AI_PID="$P2AI_STATE_DIR/agent.pid"
 P2AI_DB_PATH_FILE="$P2AI_STATE_DIR/db.path"
 
-# Resolve DB path: explicit env-var > saved path file > default
+# Resolve DB path: explicit env-var > saved setup path > probe common names > default.
+# The probe handles the case where `p2ai setup` never ran (or ran before the DB
+# existed) so a single canonically-named .kdbx in $HOME is found without an env
+# override on every call. Umlaut variants ("Passwörter.kdbx") are checked too.
+[[ -n "${P2AI_DB:-}" ]] && P2AI_DB_ENV_SET=1 || P2AI_DB_ENV_SET=""
 if [[ -z "${P2AI_DB:-}" && -r "$P2AI_DB_PATH_FILE" ]]; then
   P2AI_DB=$(<"$P2AI_DB_PATH_FILE")
+fi
+if [[ -z "${P2AI_DB:-}" ]]; then
+  for _cand in \
+    "$HOME/passwords.kdbx"  "$HOME/Passwörter.kdbx"  "$HOME/Passwoerter.kdbx" \
+    "$HOME/Passwords.kdbx"  "$HOME/passwort.kdbx"    "$HOME/keepass.kdbx" \
+    "$HOME/Documents/passwords.kdbx" "$HOME/Documents/Passwörter.kdbx"; do
+    [[ -r "$_cand" ]] && { P2AI_DB="$_cand"; break; }
+  done
+  unset _cand
+  # Persist the discovered path so `p2ai config` is consistent and later calls
+  # skip the probe. Best-effort only — never fail the command over this.
+  if [[ -n "${P2AI_DB:-}" && ! -e "$P2AI_DB_PATH_FILE" ]]; then
+    mkdir -p "$P2AI_STATE_DIR" 2>/dev/null && chmod 700 "$P2AI_STATE_DIR" 2>/dev/null \
+      && printf '%s' "$P2AI_DB" > "$P2AI_DB_PATH_FILE" 2>/dev/null \
+      && chmod 600 "$P2AI_DB_PATH_FILE" 2>/dev/null || true
+  fi
 fi
 P2AI_DB="${P2AI_DB:-$HOME/passwords.kdbx}"
 
@@ -238,6 +260,9 @@ cmd_setup() {
   local existing="$P2AI_DB"
   if [[ -r "$existing" ]]; then
     printf 'p2ai: using existing DB: %s\n' "$existing" >&2
+    # Persist it so every later call resolves the same DB without a $P2AI_DB
+    # override — even if the path has a non-ASCII name like "Passwörter.kdbx".
+    printf '%s' "$existing" > "$P2AI_DB_PATH_FILE" && chmod 600 "$P2AI_DB_PATH_FILE"
   else
     local kpcli; kpcli=$(resolve_kpcli)
     printf 'p2ai: no DB found — creating new database at %s\n' "$existing" >&2
@@ -461,13 +486,19 @@ cmd_status() {
 }
 
 cmd_config() {
+  local db_src
+  if [[ -n "${P2AI_DB_ENV_SET:-}" ]]; then db_src="\$P2AI_DB env"
+  elif [[ -r "$P2AI_DB_PATH_FILE" ]] && [[ "$(<"$P2AI_DB_PATH_FILE")" == "$P2AI_DB" ]]; then db_src="saved (setup)"
+  else db_src="probed / default"; fi
   printf 'P2AI_DB:               %s\n' "$P2AI_DB"
+  printf '  source:              %s\n' "$db_src"
   printf 'P2AI_KEEPASSXC_CLI:    %s\n' "$(resolve_kpcli)"
   printf 'P2AI_CLEAR_SECONDS:    %s\n' "$P2AI_CLEAR_SECONDS"
   printf 'P2AI_AGENT_TTL:        %s\n' "$P2AI_AGENT_TTL"
   printf 'master-bin:            %s\n' "$P2AI_MASTER_BIN"
   printf 'agent-bin:             %s\n' "$P2AI_AGENT_BIN"
   printf 'state dir:             %s\n' "$P2AI_STATE_DIR"
+  printf 'db path file:          %s\n' "$([[ -r "$P2AI_DB_PATH_FILE" ]] && cat "$P2AI_DB_PATH_FILE" || echo '(none)')"
   printf 'db readable:           %s\n' "$([[ -r "$P2AI_DB" ]] && echo yes || echo NO)"
   printf 'agent running:         %s\n' "$(agent_running && echo yes || echo no)"
 }
@@ -810,17 +841,45 @@ USAGE
   disown
 }
 
+# acquire_new_pw <pw_stdin:0|1> <entry-label>
+# Obtains the password for a new/edited entry and echoes it on stdout with NO
+# trailing newline. Never echoes it to a real terminal. Sources:
+#   pw_stdin=1 → first line of this process's stdin  (pbpaste | p2ai add … --password-stdin)
+#   pw_stdin=0 → hidden prompt on the controlling terminal  (interactive `-p`)
+# Dies (exit 1) on an empty value, or when an interactive prompt is requested
+# but stdin is not a TTY — instead of silently storing an empty password.
+# keepassxc-cli reads BOTH the DB master and the entry password from stdin, so
+# the caller pipes "<master>\n<new_pw>\n" to it; we just supply <new_pw>.
+acquire_new_pw() {
+  local pw_stdin="$1" label="$2" pw=""
+  if [[ "$pw_stdin" == "1" ]]; then
+    IFS= read -r pw || true
+    [[ -n "$pw" ]] || { printf 'p2ai: --password-stdin: no password on stdin\n' >&2; exit 1; }
+  elif [[ -t 0 ]]; then
+    printf 'New password for "%s": ' "$label" >&2
+    IFS= read -rs pw || true
+    printf '\n' >&2
+    [[ -n "$pw" ]] || { printf 'p2ai: empty password — aborting\n' >&2; exit 1; }
+  else
+    printf 'p2ai: stdin is not a TTY — cannot prompt for a password.\n' >&2
+    printf '      Pipe it instead:  pbpaste | p2ai <add|edit> "%s" --password-stdin\n' "$label" >&2
+    exit 1
+  fi
+  printf '%s' "$pw"
+}
+
 cmd_add() {
-  local entry="" user="" url="" notes="" gen_len="" prompt_pw=0
+  local entry="" user="" url="" notes="" gen_len="" prompt_pw=0 pw_stdin=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -u|--username)  user="${2:?}"; shift 2 ;;
-      --url)          url="${2:?}"; shift 2 ;;
-      --notes)        notes="${2:?}"; shift 2 ;;
-      -g|--generate)  gen_len="${2:-24}"
-                      [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
-                      shift 2 ;;
-      -p|--password)  prompt_pw=1; shift ;;
+      -u|--username)     user="${2:?}"; shift 2 ;;
+      --url)             url="${2:?}"; shift 2 ;;
+      --notes)           notes="${2:?}"; shift 2 ;;
+      -g|--generate)     gen_len="${2:-24}"
+                         [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
+                         shift 2 ;;
+      -p|--password)     prompt_pw=1; shift ;;
+      --password-stdin)  prompt_pw=1; pw_stdin=1; shift ;;
       -h|--help)
         cat <<USAGE
 p2ai add <entry> [options]
@@ -828,22 +887,30 @@ p2ai add <entry> [options]
   --url URL               URL field
   --notes TEXT            notes field
   -g, --generate [LEN]    auto-generate password (default length 24)
-  -p, --password          prompt interactively for password (hidden)
-Default if neither -g nor -p: -g 24.
+  -p, --password          prompt for the password on the terminal (hidden)
+  --password-stdin        read the password from line 1 of stdin (for AI agents):
+                            pbpaste | p2ai add "API Token" --password-stdin
+Default if none of -g / -p / --password-stdin is given: -g 24.
 USAGE
         return 0 ;;
       -*) die "unknown add flag: $1" ;;
       *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai add <entry> [-u user] [-g [LEN]] [-p] [--url URL] [--notes TEXT]"
+  [[ -n "$entry" ]] || die "usage: p2ai add <entry> [-u USER] [-g [LEN] | -p | --password-stdin] [--url URL] [--notes TEXT]"
+  [[ -n "$gen_len" && $prompt_pw -eq 1 ]] && die "pick either -g (auto-generate) or -p/--password-stdin (supply a password), not both"
   require_db
   [[ -w "$P2AI_DB" ]] || die "DB not writable: $P2AI_DB"
   local kpcli; kpcli=$(resolve_kpcli)
 
-  # Default: auto-generate 24-char password
-  if [[ -z "$gen_len" && $prompt_pw -eq 0 ]]; then
-    gen_len=24
+  # Default: auto-generate a 24-char password when no password source was given.
+  if [[ -z "$gen_len" && $prompt_pw -eq 0 ]]; then gen_len=24; fi
+
+  # Acquire the new entry password BEFORE Touch-ID so an empty/missing value
+  # fails loudly here instead of silently storing an empty password.
+  local new_pw=""
+  if [[ $prompt_pw -eq 1 ]]; then
+    new_pw=$(acquire_new_pw "$pw_stdin" "$entry") || exit 1
   fi
 
   local master; master=$(fetch_master "$(p2ai_reason add "$entry")") || die "auth failed"
@@ -855,19 +922,22 @@ USAGE
   [[ -n "$notes" ]] && args+=(--notes "$notes")
   if [[ -n "$gen_len" ]]; then
     args+=(-g -L "$gen_len" -l -U -n -s --exclude-similar)
-  elif [[ $prompt_pw -eq 1 ]]; then
+  else
     args+=(-p)
   fi
   args+=("$P2AI_DB" "$entry")
 
-  # Run keepassxc-cli — master via stdin, entry-pwd prompt on TTY (if -p)
-  if printf '%s\n' "$master" | "$kpcli" "${args[@]}"; then
-    master=""
-    printf 'p2ai: added "%s" to %s\n' "$entry" "$P2AI_DB" >&2
+  # keepassxc-cli reads the DB master from stdin line 1 and, with -p, the entry
+  # password from line 2. Feed both; the entry-pw line is omitted for -g.
+  local rc=0
+  if [[ $prompt_pw -eq 1 ]]; then
+    printf '%s\n%s\n' "$master" "$new_pw" | "$kpcli" "${args[@]}" || rc=$?
   else
-    master=""
-    die "keepassxc-cli add failed"
+    printf '%s\n' "$master" | "$kpcli" "${args[@]}" || rc=$?
   fi
+  master=""; new_pw=""
+  [[ $rc -eq 0 ]] || die "keepassxc-cli add failed (exit $rc)"
+  printf 'p2ai: added "%s" to %s\n' "$entry" "$P2AI_DB" >&2
 }
 
 cmd_rm() {
@@ -912,17 +982,18 @@ USAGE
 }
 
 cmd_edit() {
-  local entry="" user="" url="" notes="" title="" gen_len="" prompt_pw=0
+  local entry="" user="" url="" notes="" title="" gen_len="" prompt_pw=0 pw_stdin=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -u|--username)  user="${2:?}"; shift 2 ;;
-      --url)          url="${2:?}"; shift 2 ;;
-      --notes)        notes="${2:?}"; shift 2 ;;
-      -t|--title)     title="${2:?}"; shift 2 ;;
-      -g|--generate)  gen_len="${2:-24}"
-                      [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
-                      shift 2 ;;
-      -p|--password)  prompt_pw=1; shift ;;
+      -u|--username)     user="${2:?}"; shift 2 ;;
+      --url)             url="${2:?}"; shift 2 ;;
+      --notes)           notes="${2:?}"; shift 2 ;;
+      -t|--title)        title="${2:?}"; shift 2 ;;
+      -g|--generate)     gen_len="${2:-24}"
+                         [[ "$gen_len" =~ ^[0-9]+$ ]] || { gen_len=24; shift 1; continue; }
+                         shift 2 ;;
+      -p|--password)     prompt_pw=1; shift ;;
+      --password-stdin)  prompt_pw=1; pw_stdin=1; shift ;;
       -h|--help)
         cat <<USAGE
 p2ai edit <entry> [options]
@@ -930,19 +1001,29 @@ p2ai edit <entry> [options]
   --url URL               update URL
   --notes TEXT            update notes
   -t, --title NEW         rename entry (changes title)
-  -g, --generate [LEN]    rotate password (default length 24)
-  -p, --password          prompt interactively for new password
+  -g, --generate [LEN]    rotate password to a fresh auto-generated one (default 24)
+  -p, --password          prompt for the new password on the terminal (hidden)
+  --password-stdin        read the new password from line 1 of stdin (for AI agents):
+                            pbpaste | p2ai edit "API Token" --password-stdin
 USAGE
         return 0 ;;
       -*) die "unknown edit flag: $1" ;;
       *)  [[ -z "$entry" ]] && entry="$1" || die "extra arg: $1"; shift ;;
     esac
   done
-  [[ -n "$entry" ]] || die "usage: p2ai edit <entry> [-u USER] [--url URL] [--notes TXT] [-t TITLE] [-g [LEN]] [-p]"
+  [[ -n "$entry" ]] || die "usage: p2ai edit <entry> [-u USER] [--url URL] [--notes TXT] [-t TITLE] [-g [LEN] | -p | --password-stdin]"
   [[ -n "$user$url$notes$title$gen_len" || $prompt_pw -eq 1 ]] || die "nothing to change — pass at least one option"
+  [[ -n "$gen_len" && $prompt_pw -eq 1 ]] && die "pick either -g (auto-generate) or -p/--password-stdin (supply a password), not both"
   require_db
   [[ -w "$P2AI_DB" ]] || die "DB not writable: $P2AI_DB"
   local kpcli; kpcli=$(resolve_kpcli)
+
+  # Acquire the new password (if any) BEFORE Touch-ID so an empty/missing value
+  # fails loudly here instead of silently overwriting the entry with an empty one.
+  local new_pw=""
+  if [[ $prompt_pw -eq 1 ]]; then
+    new_pw=$(acquire_new_pw "$pw_stdin" "$entry") || exit 1
+  fi
 
   local args=(edit)
   [[ -n "$user" ]]   && args+=(-u "$user")
@@ -957,16 +1038,18 @@ USAGE
   args+=("$P2AI_DB" "$entry")
 
   local master; master=$(fetch_master "$(p2ai_reason edit "$entry")") || die "auth failed"
-  if printf '%s\n' "$master" | "$kpcli" "${args[@]}"; then
-    master=""
-    printf 'p2ai: edited "%s"\n' "$entry" >&2
-    # Invalidate cached values (password may have rotated)
-    if agent_running; then
-      agent_send "INVALIDATE $entry" >/dev/null 2>&1 || true
-    fi
+  local rc=0
+  if [[ $prompt_pw -eq 1 ]]; then
+    printf '%s\n%s\n' "$master" "$new_pw" | "$kpcli" "${args[@]}" || rc=$?
   else
-    master=""
-    die "keepassxc-cli edit failed"
+    printf '%s\n' "$master" | "$kpcli" "${args[@]}" || rc=$?
+  fi
+  master=""; new_pw=""
+  [[ $rc -eq 0 ]] || die "keepassxc-cli edit failed (exit $rc)"
+  printf 'p2ai: edited "%s"\n' "$entry" >&2
+  # Invalidate cached values (password may have rotated)
+  if agent_running; then
+    agent_send "INVALIDATE $entry" >/dev/null 2>&1 || true
   fi
 }
 

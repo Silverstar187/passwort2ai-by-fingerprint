@@ -16,7 +16,10 @@ Touch-ID-gated KeePass-CLI wrapper. Replaces every "paste your token in chat" wi
    - **`p2ai fetch '<entry>'`**, pbcopy with auto-clear after 30s. Use this for human-driven paste flows.
 4. **`--print`, `-o FILE` for fetch, and `--export VAR` are all REMOVED.** Each was a transcript-leak path. The wrapper refuses them with a pointer to `p2ai run`.
 5. **When the user shares a secret via clipboard** ("I copied it"), read with `pbpaste` and pipe directly to the consumer (`pbpaste | tool` etc.). Never echo it back.
-6. **For storing new secrets**: `p2ai add "<entry>"` with `-g` (auto-generate) or `-p` (interactive prompt, user types in their terminal, not in chat).
+6. **For storing new secrets**:
+   - `p2ai add "<entry>" -g` — auto-generate a 24-char password.
+   - `p2ai add "<entry>" --password-stdin` — store a value you already have (e.g. from the clipboard) without a TTY: `pbpaste | p2ai add "<entry>" --password-stdin`. The password is read as line 1 of stdin and never touches argv, stdout, or disk. Use this from agent shells — `-p` (terminal prompt) needs a real TTY and will refuse a piped/redirected stdin rather than silently store an empty password.
+   - `p2ai edit "<entry>" --password-stdin` — rotate an existing entry to a value you have (`pbpaste | p2ai edit "<entry>" --password-stdin`), or `p2ai edit "<entry>" -g` to rotate to a fresh random one.
 
 ## When to use this skill
 
@@ -49,9 +52,11 @@ p2ai list <fuzzy>
 
 # Add / edit / delete / move
 p2ai add "<entry>" -u USER                         # auto-generates 24-char password
-p2ai add "<entry>" -u USER -p                      # user types pw in terminal (not chat)
+p2ai add "<entry>" -u USER -p                      # user types pw in their terminal (needs a TTY)
+pbpaste | p2ai add "<entry>" -u USER --password-stdin   # store a value you have (agent-safe, no TTY)
 p2ai add "<entry>" --url URL --notes TEXT          # extra fields
 p2ai edit "<entry>" -g                             # rotate password (auto-gen 24c)
+pbpaste | p2ai edit "<entry>" --password-stdin     # rotate to a value you have (agent-safe)
 p2ai edit "<entry>" --notes "new text"             # update a field
 p2ai edit "<entry>" -t "New Title"                 # rename entry
 p2ai rm "<entry>" [-f]                             # delete (confirms unless -f)
@@ -84,8 +89,10 @@ p2ai setup                 # master enrollment + .kdbx file picker
 | Multi-step deploy in one shell | `p2ai run -e VAR='X' -- bash deploy.sh` (or wrap commands in a script) |
 | User asks "copy token to clipboard" | `p2ai fetch 'X'` (pbcopy + auto-clear) |
 | Don't know exact entry name | `p2ai list <fuzzy>` first |
-| User hands you a fresh secret to save | `p2ai add 'Service Name' -u user -p` |
-| User pasted secret to clipboard already | `pbpaste \| tool`, never echo to chat |
+| User hands you a fresh secret to save (agent shell, no TTY) | `pbpaste \| p2ai add 'Service Name' -u user --password-stdin` |
+| User saves a secret themselves at a terminal | `p2ai add 'Service Name' -u user -p` (prompts on the TTY) |
+| Rotate an existing entry to a value the user gave you | `pbpaste \| p2ai edit 'Service Name' --password-stdin` |
+| User pasted a secret to clipboard, you need to *use* it | `pbpaste \| tool`, never echo to chat |
 | Need many fetches in succession | `p2ai unlock` once, then proceed |
 | Tool wants secret as CLI arg (`--password=X`) | **Avoid**, argv visible via `ps`. Prefer `p2ai run` + env, or `--password-stdin` if available |
 | Inspecting a secret's structure | `p2ai run -e V='X'::Notes -- bash -c 'grep -q "marker" <<<"$V"; echo $?'`, only the boolean reaches transcript |
