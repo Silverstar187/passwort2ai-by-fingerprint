@@ -56,6 +56,55 @@ start_agent() {
 
 ag() { printf '%s\n' "$1" | nc -U "$P2AI_STATE_DIR/agent.sock" 2>/dev/null; }
 
+agent_came_up() { [[ -S "$P2AI_STATE_DIR/agent.sock" ]]; }
+
+# Rebuild bin/p2ai-agent from src (same flags as install.sh). Returns 0 on success.
+rebuild_agent() {
+  command -v swiftc >/dev/null 2>&1 || return 1
+  [[ -f "$REPO/src/p2ai-agent.swift" ]] || return 1
+  local plist; plist="$(mktemp -t p2ai-info.XXXXXX.plist)"
+  cat > "$plist" <<'PL'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>ai.nexperts.passwort2ai</string></dict></plist>
+PL
+  local rc=0
+  swiftc "$REPO/src/p2ai-agent.swift" -o "$AGENT_BIN" -O \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$plist" >/dev/null 2>&1 || rc=$?
+  rm -f "$plist"
+  [[ $rc -eq 0 ]] || return 1
+  codesign -s - --force "$AGENT_BIN" >/dev/null 2>&1 || true
+  return 0
+}
+
+# ---------- agent preflight ----------
+# Most sections need a working p2ai-agent. A *stale* binary (e.g. built before the
+# session→auto mode rename) makes `p2ai unlock` fail and cascades into a pile of
+# confusing FAILs that aren't real defects. Detect that here once: if the agent
+# won't come up, rebuild it from src/ when swiftc is available; if it still won't,
+# warn loudly so the suite output is honest about *why*.
+AGENT_STALE=0
+section "0. Agent preflight"
+start_agent session
+if agent_came_up; then
+  pass "0: p2ai-agent starts (mode=auto)"
+  "$P2AI" lock >/dev/null 2>&1 || true
+else
+  if rebuild_agent; then
+    start_agent session
+    if agent_came_up; then
+      pass "0: p2ai-agent was stale — rebuilt from src/, now starts"
+      "$P2AI" lock >/dev/null 2>&1 || true
+    else
+      AGENT_STALE=1
+      fail "0: p2ai-agent still won't start after rebuild — agent sections below are unreliable"
+    fi
+  else
+    AGENT_STALE=1
+    fail "0: p2ai-agent won't start and can't rebuild (no swiftc / src). Run ./install.sh on a Mac with Xcode CLT. Agent sections below will FAIL — not real defects."
+  fi
+fi
+
 # ---------- tests ----------
 
 section "1. Filesystem permissions"
