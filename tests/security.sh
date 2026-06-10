@@ -695,6 +695,65 @@ else
   pass "27: --password-stdin add output is free of the supplied password"
 fi
 
+section "28. p2ai run multiline secret never leaks via shell-eval (issue: PEM/SA-JSON leak)"
+
+# Regression guard for the repeatedly-observed leak: a multiline secret (PEM
+# private key, service-account JSON) routed through `p2ai run -e VAR=entry`
+# used to be passed to the child via an `eval "VAR=$(printf %q) exec cmd"`
+# string. For a value starting with `-----` / containing newlines, bash split
+# the eval'd word, the assignment failed, and bash echoed the ENTIRE secret to
+# stderr (`VAR=-----BEGIN...: command not found` / `File name too long`).
+# The fix routes secrets through `env NAME=VALUE -- cmd` (execve, no shell
+# parse). This test uses a SYNTHETIC fake-PEM only — never a real key.
+#
+# Entry name deliberately contains spaces + parentheses, mirroring the real
+# "Google Service Account ... (key e2ad1867) (HOSTINGER)" entry shape.
+ML_ENTRY='Test SA (key deadbeef) (FIXTURE)'
+FAKE_PEM=$'-----BEGIN PRIVATE KEY-----\nLINE1AAAA\nLINE2BBBB\nLINE3CCCC\n-----END PRIVATE KEY-----'
+# Sentinel that only ever appears inside the synthetic secret body.
+ML_SENTINEL='LINE2BBBB'
+
+# Store the multiline fake-PEM in BOTH Password and Notes so we exercise both
+# the default attribute and the ::attr path. keepassxc-cli `add` reads the
+# entry password from the prompt (single line), so the multiline value goes in
+# via --notes; we then assert against ::Notes. We also set a multiline Password
+# through a here-doc on the password prompt to cover the default-attr path.
+printf '%s\n' "$TESTMASTER" \
+  | keepassxc-cli add -p "$TESTDB" "$ML_ENTRY" --notes "$FAKE_PEM" >/dev/null 2>&1 <<KPADD
+$TESTMASTER
+placeholderpw
+KPADD
+
+# 28a. Child receives the FULL multiline value (5 non-empty lines) — the old
+#      code left the child with an empty VAR (rc=127), so this also guards the
+#      functional regression.
+ml_child=$("$P2AI" run -e VAR="$ML_ENTRY"::Notes -- printenv VAR 2>/dev/null)
+ml_lines=$(printf '%s' "$ml_child" | grep -c .)
+if [[ "$ml_lines" -eq 5 ]] && printf '%s' "$ml_child" | grep -qF "$ML_SENTINEL"; then
+  pass "28a: child receives full multiline secret (5 lines, intact)"
+else
+  fail "28a: child multiline env wrong (lines=$ml_lines, sentinel missing?)"
+fi
+
+# 28b. THE LEAK ASSERTION: the synthetic PEM body must appear in NONE of
+#      p2ai's own stdout/stderr. We capture stdout and stderr of `p2ai run`
+#      SEPARATELY from the child's output by running a child that writes
+#      nothing to our captured streams (`true`). Any occurrence of the sentinel
+#      in p2ai's combined output is a leak.
+leak_out=$("$P2AI" run -e VAR="$ML_ENTRY"::Notes -- true 2>&1)
+if printf '%s' "$leak_out" | grep -qF "$ML_SENTINEL"; then
+  fail "28b: multiline secret LEAKED into p2ai stdout/stderr: $(printf '%s' "$leak_out" | head -1)"
+else
+  pass "28b: multiline secret never appears in p2ai stdout/stderr"
+fi
+
+# 28c. Single-line entries still work after the fix (no regression).
+"$P2AI" add "MLSingle" -u u -g 24 >/dev/null 2>&1
+sl=$("$P2AI" run -e S='MLSingle' -- bash -c 'printf len=%d "${#S}"')
+[[ "$sl" == "len=24" ]] \
+  && pass "28c: single-line secret injection unaffected by fix" \
+  || fail "28c: single-line regression: $sl"
+
 # ---------- summary ----------
 
 "$P2AI" lock >/dev/null 2>&1
