@@ -1280,25 +1280,27 @@ USAGE
   done
   master=""
 
-  # Use bash's one-shot env assignment + exec. The `VAR=val cmd` syntax
-  # scopes the assignment to cmd's environment only (not the parent shell),
-  # AND `exec` replaces our bash process with cmd — same PID.
+  # Hand the secrets to the child via `env NAME=VALUE … cmd …` and exec it.
   #
-  # Why same-PID matters: signals (SIGINT, SIGTERM) sent to p2ai go straight
-  # to cmd. No orphan processes when the user Ctrl+C's a long-running tool.
-  # Why argv-safe: the assignments are bash-internal one-shot syntax, never
-  # appear in /proc/PID/cmdline or `ps -p PID -o args`.
-  local assignments=""
-  local kv
-  for kv in "${env_kv[@]}"; do
-    assignments+=" $(printf '%q' "$kv")"
-  done
-  local cmd_str=""
-  local c
-  for c in "${cmd[@]}"; do
-    cmd_str+=" $(printf '%q' "$c")"
-  done
-  eval "$assignments exec $cmd_str"
+  # We MUST NOT route the value through a shell-parsed string (`eval "VAR=$val
+  # exec cmd"`). A multiline secret (PEM private key, service-account JSON) or a
+  # value starting with `-----` collapses that eval: bash splits the word, the
+  # assignment fails, and bash echoes the ENTIRE secret to stderr
+  # (`VAR=-----BEGIN…: command not found` / `File name too long`). That is the
+  # exact transcript-leak this tool exists to prevent.
+  #
+  # `env` sets each NAME=VALUE pair via execve(2) directly — the value never
+  # passes through a shell parse, so newlines / `=` / quotes / parens come
+  # through verbatim and never appear in any error path. The env_kv elements are
+  # passed as literal argv words (no word-splitting, no globbing), and exec
+  # replaces our bash process with `env`, which in turn execve's cmd in place —
+  # so cmd keeps p2ai's PID (signals reach it, no orphans) and the secrets never
+  # land in /proc/PID/cmdline of any process the parent can see.
+  #
+  # macOS/BSD `env` does not understand a `--` end-of-options separator, and we
+  # don't need one: every env_kv element contains `=`, so `env` treats it as an
+  # assignment, not an option; cmd and its args follow unchanged.
+  exec env "${env_kv[@]}" "${cmd[@]}"
 }
 
 cmd_fetch() {
