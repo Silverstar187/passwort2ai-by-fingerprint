@@ -22,7 +22,7 @@ jobs:
         os: [macos-26, macos-15, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install keepassxc-cli
         run: brew install --cask keepassxc
